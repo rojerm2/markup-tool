@@ -109,7 +109,7 @@ it('keeps pointer-down style through control changes and applies the new style t
 
 it('shares preview and committed opacity layers without merging vectors or changing cross-color order', () => {
   const commit = vi.fn();
-  const yellow: Highlight = { id: 'yellow', page: 1, type: 'freehand', color: '#facc15', width: 10, opacity: .4, points: [{ x: 40, y: 110 }, { x: 70, y: 80 }] };
+  const yellow: Highlight = { id: 'yellow', legendId: null, page: 1, type: 'freehand', color: '#facc15', width: 10, opacity: .4, points: [{ x: 40, y: 110 }, { x: 70, y: 80 }] };
   const blue = { ...yellow, id: 'blue', color: '#38bdf8' };
   const props = { page: 1, viewport: viewport(), annotations: [yellow, blue], onCommit: commit };
   const view = render(<AnnotationOverlay {...props} />);

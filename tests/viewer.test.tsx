@@ -15,7 +15,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 function page(number = 1) {
-  return { pageNumber: number, getViewport: () => ({ width: 600, height: 800, convertToViewportPoint: (x: number, y: number) => [x, 800-y] }),
+  return { pageNumber: number, getViewport: () => ({ width: 600, height: 800, convertToViewportPoint: (x: number, y: number) => [x, 800-y], convertToPdfPoint: (x: number, y: number) => [x, 800-y] }),
     render: vi.fn(() => ({ promise: Promise.resolve(), cancel: vi.fn() })) } as unknown as PDFPageProxy;
 }
 function documentWith(...pages: PDFPageProxy[]) {
@@ -76,4 +76,35 @@ describe("PDF opening", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0][0].canvas).not.toBe(calls[1][0].canvas);
   });
+});
+
+it('resets legends, active selection and vectors on document replacement while picker cancellation retains them', async () => {
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({} as CanvasRenderingContext2D);
+  vi.mocked(loadDocument).mockResolvedValue(documentWith(page()));
+  vi.mocked(open).mockResolvedValueOnce('first.pdf').mockResolvedValueOnce(null).mockResolvedValueOnce('second.pdf');
+  render(<App />);
+  fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }));
+  await screen.findByLabelText('PDF page 1');
+  fireEvent.click(screen.getByRole('button', { name: 'Legends (0)' }));
+  fireEvent.change(screen.getByLabelText('Legend name'), { target: { value: 'Walls' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Create legend' }));
+  expect(screen.getByLabelText('Active legend').textContent).toBe('Active: Walls');
+  const svg = screen.getByLabelText('Highlights for page 1');
+  Object.assign(svg, { setPointerCapture() {}, hasPointerCapture: () => false,
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 600, bottom: 800, width: 600, height: 800 }) });
+  for (const [type, x] of [['pointerdown', 40], ['pointerup', 80]] as const) {
+    fireEvent(svg, Object.assign(new MouseEvent(type, { bubbles: true, button: 0, clientX: x, clientY: 50 }), { pointerId: 4 }));
+  }
+  const vector = svg.querySelector('polyline')!.outerHTML;
+  expect(vector).toContain('40,50 80,50');
+  fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Open PDF' }).hasAttribute('disabled')).toBe(false));
+  expect(screen.getByLabelText('Active legend').textContent).toBe('Active: Walls');
+  expect(svg.querySelector('polyline')!.outerHTML).toBe(vector);
+  fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }));
+  await waitFor(() => expect(loadDocument).toHaveBeenCalledTimes(2));
+  await screen.findByLabelText('PDF page 1');
+  expect(screen.getByLabelText('Active legend').textContent).toBe('Unassigned · Manual color');
+  expect(screen.getByRole('button', { name: 'Legends (0)' })).toBeTruthy();
+  expect(screen.getByLabelText('Highlights for page 1').querySelector('polyline')).toBeNull();
 });

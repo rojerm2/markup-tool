@@ -1,20 +1,20 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import type { PDFPageProxy } from "pdfjs-dist";
 import { clampZoom, clientToPdf, fitScale, MAX_ZOOM, MIN_ZOOM, pdfToClient, type Point, type ZoomMode } from "../../services/coordinates";
 import PdfPage from "./PdfPage";
 import { useSpacePan } from "./useSpacePan";
 
 import AnnotationOverlay from "../Annotations/AnnotationOverlay";
-import type { Highlight } from "../../types/annotation";
-
-import DrawingControls, { DEFAULT_DRAWING } from "../Annotations/DrawingControls";
+import DrawingControls from "../Annotations/DrawingControls";
+import LegendControls from "../Annotations/LegendControls";
+import { emptySession, sessionReducer } from "../../services/annotationSession";
 
 const GUTTER = 32;
 const LABEL_HEIGHT = 28;
 
 export default function PdfNavigationView({ pages }: { pages: PDFPageProxy[] }) {
-  const [drawing, setDrawing] = useState(DEFAULT_DRAWING);
-  const [annotations, setAnnotations] = useState<Highlight[]>([]);
+  const [session, dispatch] = useReducer(sessionReducer, emptySession);
+  const { drawing, annotations, activeLegendId } = session;
   const host = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [current, setCurrent] = useState(1);
@@ -160,7 +160,8 @@ export default function PdfNavigationView({ pages }: { pages: PDFPageProxy[] }) 
       </div>
 
     </div>
-    <DrawingControls value={drawing} onChange={setDrawing} />
+    <DrawingControls value={drawing} onChange={(drawing, manual) => dispatch({ type: 'drawing', drawing, manual })} />
+    <LegendControls session={session} dispatch={dispatch} />
     <div ref={host} {...pan} className={`pdf-scroll ${pan.className}`} tabIndex={0}
       role="region" aria-label="PDF pages" aria-describedby="pan-hint" onScroll={updateCurrent}>
       <div className="pdf-pages">
@@ -168,9 +169,9 @@ export default function PdfNavigationView({ pages }: { pages: PDFPageProxy[] }) 
           const viewport = page.getViewport({ scale: scales[index] });
           return <div key={page.pageNumber} data-page={page.pageNumber} style={{ width: viewport.width, minHeight: viewport.height + LABEL_HEIGHT }}>
             <PdfPage page={page} scale={scales[index]}>
-              <AnnotationOverlay page={page.pageNumber} viewport={viewport} style={drawing}
+              <AnnotationOverlay page={page.pageNumber} viewport={viewport} style={drawing} legendId={activeLegendId}
                 annotations={annotations.filter(stroke => stroke.page === page.pageNumber)}
-                onCommit={stroke => setAnnotations(previous => [...previous, stroke])} />
+                onCommit={stroke => dispatch({ type: 'commit', stroke })} />
             </PdfPage>
           </div>;
         })}

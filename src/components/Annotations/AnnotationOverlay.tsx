@@ -3,9 +3,9 @@ import { clientToPdf, pdfToViewport, pdfWidthToViewport, type PageViewport, type
 import { DEFAULT_DRAWING, type DrawingStyle } from './DrawingControls';
 import type { Highlight } from '../../types/annotation';
 
-type Props = { page: number; viewport: PageViewport; annotations: Highlight[]; onCommit: (stroke: Highlight) => void; style?: DrawingStyle };
+type Props = { page: number; viewport: PageViewport; annotations: Highlight[]; onCommit: (stroke: Highlight) => void; style?: DrawingStyle; legendId?: string | null };
 
-export default function AnnotationOverlay({ page, viewport, annotations, onCommit, style = DEFAULT_DRAWING }: Props) {
+export default function AnnotationOverlay({ page, viewport, annotations, onCommit, style = DEFAULT_DRAWING, legendId = null }: Props) {
   const svg = useRef<SVGSVGElement>(null);
   const draft = useRef<{ pointer: number; stroke: Highlight; samples: Point[] } | null>(null);
   const [preview, setPreview] = useState<Highlight | null>(null);
@@ -75,7 +75,7 @@ export default function AnnotationOverlay({ page, viewport, annotations, onCommi
       if (event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || draft.current) return;
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
-      const stroke: Highlight = { id: crypto.randomUUID(), page, type: 'freehand', points: [point(event)], ...style };
+      const stroke: Highlight = { id: crypto.randomUUID(), legendId, page, type: 'freehand', points: [point(event)], ...style };
       draft.current = { pointer: event.pointerId, stroke, samples: [...stroke.points] }; setPreview(stroke);
     }}
     onPointerMove={event => { if (draft.current?.pointer === event.pointerId && event.buttons === 0) cancel(); else append(event); }}
@@ -89,7 +89,7 @@ export default function AnnotationOverlay({ page, viewport, annotations, onCommi
     onPointerCancel={cancel} onLostPointerCapture={cancel}>
     {[...groups].map(([key, strokes]) => <g key={key} opacity={strokes[0].opacity} data-highlight-layer={key}>
       {strokes.map(stroke => <polyline key={stroke.id}
-      data-annotation-id={stroke.id} data-draft={stroke === preview ? 'true' : undefined}
+      data-annotation-id={stroke.id} data-legend-id={stroke.legendId ?? ''} data-draft={stroke === preview ? 'true' : undefined}
       points={stroke.points.map(p => { const v = pdfToViewport(p, viewport); return `${v.x},${v.y}`; }).join(' ')}
       fill="none" stroke={stroke.color} strokeWidth={pdfWidthToViewport(stroke.width, viewport)}
       strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />)}
