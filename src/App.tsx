@@ -30,9 +30,9 @@ function App() {
   };
 
   return (
-    <main className="flex h-screen flex-col bg-gray-500 text-white">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-600 px-4 py-3">
-        <h1 className="text-2xl font-bold text-amber-300">PDF Floor Plan Markup Tool</h1>
+    <main className="flex h-screen flex-col bg-slate-800 text-white">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700 px-4 py-3">
+        <h1 className="text-lg font-semibold text-slate-100">PDF Floor Plan Markup</h1>
         <Toolbar onOpenPdf={handleOpenPdf} opening={opening} />
       </header>
       {error && <p role="alert" className="p-3 text-white bg-red-900">{error}</p>}

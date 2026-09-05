@@ -1,13 +1,17 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PDFPageProxy } from "pdfjs-dist";
 import { clampZoom, clientToPdf, fitScale, MAX_ZOOM, MIN_ZOOM, pdfToClient, type Point, type ZoomMode } from "../../services/coordinates";
 import PdfPage from "./PdfPage";
 import { useSpacePan } from "./useSpacePan";
 
+import AnnotationOverlay from "../Annotations/AnnotationOverlay";
+import type { Highlight } from "../../types/annotation";
+
 const GUTTER = 32;
 const LABEL_HEIGHT = 28;
 
 export default function PdfNavigationView({ pages }: { pages: PDFPageProxy[] }) {
+  const [annotations, setAnnotations] = useState<Highlight[]>([]);
   const host = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [current, setCurrent] = useState(1);
@@ -56,20 +60,38 @@ export default function PdfNavigationView({ pages }: { pages: PDFPageProxy[] }) 
     setPageInput(String(number));
   }
 
-  function changeZoom(scale: number) {
+  function changeZoom(scale: number, pointer?: Point, pageNumber = current) {
     const next = clampZoom(scale);
     if (mode === "manual" && zoom === next) return;
-    const element = host.current, canvas = pageCanvas(current);
+    const element = host.current, canvas = pageCanvas(pageNumber);
     if (element && canvas) {
       const rect = element.getBoundingClientRect();
-      const x = element.clientWidth / 2, y = element.clientHeight / 2;
-      anchor.current = { page: current, x, y, point: clientToPdf(
+      const x = pointer ? pointer.x - rect.left : element.clientWidth / 2, y = pointer ? pointer.y - rect.top : element.clientHeight / 2;
+      anchor.current = { page: pageNumber, x, y, point: clientToPdf(
         { x: rect.left + x, y: rect.top + y }, canvas.getBoundingClientRect(),
-        pages[current - 1].getViewport({ scale: activeScale }),
+        pages[pageNumber - 1].getViewport({ scale: scales[pageNumber - 1] }),
       ) };
     }
     setMode("manual"); setZoom(next);
   }
+
+  // Native non-passive listener is required to suppress browser Ctrl-wheel zoom.
+  useEffect(() => {
+    const element = host.current;
+    if (!element) return;
+    const wheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      if (!event.deltaY) return;
+      const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-page]') : null;
+      const number = target ? Number(target.dataset.page) : current;
+      const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? element.clientHeight : 1);
+      changeZoom(scales[number - 1] * Math.exp(-Math.max(-500, Math.min(500, delta)) * 0.002),
+        { x: event.clientX, y: event.clientY }, number);
+    };
+    element.addEventListener('wheel', wheel, { passive: false });
+    return () => element.removeEventListener('wheel', wheel);
+  });
 
   function fit(next: "page" | "width") {
     pendingPage.current = next === mode ? null : current;
@@ -117,6 +139,7 @@ export default function PdfNavigationView({ pages }: { pages: PDFPageProxy[] }) 
 
   return <div className="pdf-navigation">
     <div className="pdf-controls" role="toolbar" aria-label="PDF navigation">
+      <div className="control-group" role="group" aria-label="Pages">
       <button disabled={current === 1} onClick={() => navigate(current - 1)}>Previous page</button>
       <form onSubmit={event => { event.preventDefault(); navigate(Number(pageInput)); }}>
         <label>Page <input aria-label="Page number" inputMode="numeric" value={pageInput}
@@ -124,13 +147,16 @@ export default function PdfNavigationView({ pages }: { pages: PDFPageProxy[] }) 
         <span> of {pages.length}</span>
       </form>
       <button disabled={current === pages.length} onClick={() => navigate(current + 1)}>Next page</button>
+      </div><div className="control-group" role="group" aria-label="Zoom">
       <button aria-label="Zoom out" disabled={mode === "manual" && zoom <= MIN_ZOOM} onClick={() => changeZoom(activeScale / 1.25)}>−</button>
       <output aria-label="Zoom level">{Math.round(activeScale * 100)}%</output>
       <button aria-label="Zoom in" disabled={mode === "manual" && zoom >= MAX_ZOOM} onClick={() => changeZoom(activeScale * 1.25)}>+</button>
       <button onClick={() => changeZoom(1)}>100%</button>
       <button aria-pressed={mode === "page"} onClick={() => fit("page")}>Fit to page</button>
       <button aria-pressed={mode === "width"} onClick={() => fit("width")}>Fit to width</button>
-      <span id="pan-hint">Space + drag to pan</span>
+      </div>
+      <span className="tool-status">Highlight active</span>
+      <span id="pan-hint">Drag to highlight · Space + drag to pan · Ctrl + wheel to zoom · Highlights are temporary</span>
     </div>
     <div ref={host} {...pan} className={`pdf-scroll ${pan.className}`} tabIndex={0}
       role="region" aria-label="PDF pages" aria-describedby="pan-hint" onScroll={updateCurrent}>
@@ -138,7 +164,11 @@ export default function PdfNavigationView({ pages }: { pages: PDFPageProxy[] }) 
         {pages.map((page, index) => {
           const viewport = page.getViewport({ scale: scales[index] });
           return <div key={page.pageNumber} data-page={page.pageNumber} style={{ width: viewport.width, minHeight: viewport.height + LABEL_HEIGHT }}>
-            <PdfPage page={page} scale={scales[index]} />
+            <PdfPage page={page} scale={scales[index]}>
+              <AnnotationOverlay page={page.pageNumber} viewport={viewport}
+                annotations={annotations.filter(stroke => stroke.page === page.pageNumber)}
+                onCommit={stroke => setAnnotations(previous => [...previous, stroke])} />
+            </PdfPage>
           </div>;
         })}
       </div>

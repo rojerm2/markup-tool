@@ -15,7 +15,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 function page(number = 1) {
-  return { pageNumber: number, getViewport: () => ({ width: 600, height: 800 }),
+  return { pageNumber: number, getViewport: () => ({ width: 600, height: 800, convertToViewportPoint: (x: number, y: number) => [x, 800-y] }),
     render: vi.fn(() => ({ promise: Promise.resolve(), cancel: vi.fn() })) } as unknown as PDFPageProxy;
 }
 function documentWith(...pages: PDFPageProxy[]) {

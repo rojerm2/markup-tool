@@ -1,9 +1,11 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { PDFPageProxy } from "pdfjs-dist";
 
-type Props = { page: PDFPageProxy; scale?: number };
+import type { ReactNode } from "react";
 
-export default function PdfPage({ page, scale = 1.25 }: Props) {
+type Props = { page: PDFPageProxy; scale?: number; children?: ReactNode };
+
+export default function PdfPage({ page, scale = 1.25, children }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,7 +49,7 @@ export default function PdfPage({ page, scale = 1.25 }: Props) {
     <section aria-label={`Page ${page.pageNumber}`}>
       <p className="page-label">Page {page.pageNumber}</p>
       {error && <p role="alert">Could not render page {page.pageNumber}: {error}</p>}
-      <div ref={hostRef} />
+      <div className="page-surface"><div ref={hostRef} />{children}</div>
     </section>
   );
 }

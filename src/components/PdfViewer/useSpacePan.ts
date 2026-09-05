@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent, type RefObject } from "react";
 
 function isControl(target: EventTarget | null) {
-  return target instanceof Element && !!target.closest("input, textarea, select, button, [contenteditable]:not([contenteditable='false'])");
+  return target instanceof Element && !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])");
 }
 
 export function useSpacePan(host: RefObject<HTMLDivElement | null>) {
