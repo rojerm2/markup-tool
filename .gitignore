@@ -27,7 +27,6 @@ dist-ssr
 node_modules/
 
 # Package manager
-package-lock.json
 pnpm-lock.yaml
 yarn.lock
 bun.lockb
@@ -84,3 +83,4 @@ coverage/
 *.tsbuildinfo
 
 internal_docs/
+public/pdfjs/

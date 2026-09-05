@@ -1,5 +1,19 @@
 @import "tailwindcss";
 
+.pdf-navigation { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.pdf-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px; background: #374151; }
+.pdf-controls button, .pdf-controls input { padding: 5px 9px; }
+.pdf-controls input { width: 4em; }
+.pdf-controls output { min-width: 4em; text-align: center; }
+.pdf-controls button[aria-pressed="true"] { background: #bfdbfe; color: #172554; }
+button:disabled { opacity: 0.45; cursor: default; }
+button:focus-visible, input:focus-visible, .pdf-scroll:focus-visible { outline: 2px solid #fbbf24; outline-offset: -2px; }
+.pdf-scroll { flex: 1; min-height: 0; min-width: 0; overflow: auto; background: #374151; scrollbar-gutter: stable; overflow-anchor: none; }
+.pdf-pages { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 16px; width: max-content; min-width: 100%; }
+.page-label { height: 28px; text-align: center; }
+.can-pan, .can-pan * { cursor: grab; user-select: none; }
+.is-panning, .is-panning * { cursor: grabbing; user-select: none; }
+
 .logo.vite:hover {
   filter: drop-shadow(0 0 2em #747bff);
 }
