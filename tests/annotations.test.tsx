@@ -72,3 +72,80 @@ it('commits once, ignores other pointers and discards clicks and cancelled gestu
   view.rerender(<AnnotationOverlay page={1} viewport={viewport(2)} annotations={[]} onCommit={commit} />);
   expect(svg.querySelector('polyline')).toBeNull(); expect(captured).toBeNull();
 });
+
+it('toggles straight preview immediately and restores all freehand samples on Shift release', () => {
+  const commit = vi.fn();
+  render(<AnnotationOverlay page={1} viewport={viewport()} annotations={[]} onCommit={commit} />);
+  const svg = screen.getByLabelText('Highlights for page 1');
+  fireEvent.pointerDown(svg, { button: 0, pointerId: 4, clientX: 70, clientY: 90 });
+  fireEvent.pointerMove(svg, { buttons: 1, pointerId: 4, clientX: 100, clientY: 100 });
+  fireEvent.pointerMove(svg, { buttons: 1, pointerId: 4, clientX: 130, clientY: 130 });
+  const points = () => svg.querySelector('polyline')!.getAttribute('points');
+  expect(points()).toBe('20,20 50,30 80,60');
+  fireEvent.keyDown(window, { key: 'Shift', code: 'ShiftLeft' });
+  expect(points()).toBe('20,20 80,60');
+  fireEvent.keyUp(window, { key: 'Shift', code: 'ShiftLeft' });
+  expect(points()).toBe('20,20 50,30 80,60');
+  fireEvent.pointerUp(svg, { pointerId: 4, clientX: 140, clientY: 140, shiftKey: true });
+  expect(commit.mock.calls[0][0].points).toEqual([{ x: 40, y: 110 }, { x: 110, y: 60 }]);
+});
+
+it('keeps pointer-down style through control changes and applies the new style to the next stroke', () => {
+  const commit = vi.fn();
+  const props = { page: 1, viewport: viewport(), annotations: [], onCommit: commit };
+  const view = render(<AnnotationOverlay {...props} />);
+  const svg = screen.getByLabelText('Highlights for page 1');
+  fireEvent.pointerDown(svg, { button: 0, pointerId: 4, clientX: 70, clientY: 90, shiftKey: true });
+  view.rerender(<AnnotationOverlay {...props} style={{ color: '#38bdf8', width: 20, opacity: .4 }} />);
+  fireEvent.pointerMove(svg, { buttons: 1, pointerId: 4, clientX: 100, clientY: 100, shiftKey: true });
+  fireEvent.pointerMove(svg, { buttons: 1, pointerId: 4, clientX: 130, clientY: 130, shiftKey: true });
+  fireEvent.keyUp(window, { key: 'Shift' });
+  fireEvent.pointerUp(svg, { pointerId: 4, clientX: 130, clientY: 130 });
+  expect(commit.mock.calls[0][0]).toMatchObject({ color: '#facc15', width: 10 });
+  expect(commit.mock.calls[0][0].points).toHaveLength(3);
+  draw(svg);
+  expect(commit.mock.calls[1][0]).toMatchObject({ color: '#38bdf8', width: 20 });
+});
+
+it('shares preview and committed opacity layers without merging vectors or changing cross-color order', () => {
+  const commit = vi.fn();
+  const yellow: Highlight = { id: 'yellow', page: 1, type: 'freehand', color: '#facc15', width: 10, opacity: .4, points: [{ x: 40, y: 110 }, { x: 70, y: 80 }] };
+  const blue = { ...yellow, id: 'blue', color: '#38bdf8' };
+  const props = { page: 1, viewport: viewport(), annotations: [yellow, blue], onCommit: commit };
+  const view = render(<AnnotationOverlay {...props} />);
+  const svg = screen.getByLabelText('Highlights for page 1');
+  fireEvent.pointerDown(svg, { button: 0, pointerId: 4, clientX: 70, clientY: 90 });
+  fireEvent.pointerMove(svg, { buttons: 1, pointerId: 4, clientX: 100, clientY: 120 });
+  const groups = () => [...svg.querySelectorAll('g')];
+  const preview = svg.querySelector('[data-draft]')!;
+  expect(preview.parentElement).toBe(groups()[0]);
+  expect(preview.hasAttribute('opacity')).toBe(false);
+  expect(groups().map(g => g.getAttribute('opacity'))).toEqual(['0.4', '0.4']);
+  const geometry = preview.getAttribute('points');
+  fireEvent.pointerUp(svg, { pointerId: 4, clientX: 100, clientY: 120 });
+  const stroke = commit.mock.calls[0][0];
+  view.rerender(<AnnotationOverlay {...props} annotations={[yellow, blue, stroke]} />);
+  expect(groups()[0].children).toHaveLength(2);
+  expect(groups()[1].children).toHaveLength(1);
+  expect(groups()[0].lastElementChild!.getAttribute('points')).toBe(geometry);
+  expect(svg.querySelector('[data-draft]')).toBeNull();
+  view.rerender(<AnnotationOverlay {...props} annotations={[yellow, { ...yellow, id: 'dim', opacity: .2 }]} />);
+  expect(groups()).toHaveLength(2);
+});
+
+it('discards straight drafts on cancellation and rejects a straight line ending at its start', () => {
+  const commit = vi.fn();
+  render(<AnnotationOverlay page={1} viewport={viewport()} annotations={[]} onCommit={commit} />);
+  const svg = screen.getByLabelText('Highlights for page 1');
+  for (const end of [() => fireEvent.pointerCancel(svg), () => fireEvent.blur(window), () => fireEvent.keyDown(window, { code: 'Escape' })]) {
+    fireEvent.pointerDown(svg, { button: 0, pointerId: 4, clientX: 70, clientY: 90, shiftKey: true });
+    fireEvent.pointerMove(svg, { buttons: 1, pointerId: 4, clientX: 100, clientY: 120, shiftKey: true });
+    end();
+    fireEvent.keyUp(window, { key: 'Shift' });
+    expect(svg.querySelector('polyline')).toBeNull();
+  }
+  fireEvent.pointerDown(svg, { button: 0, pointerId: 4, clientX: 70, clientY: 90, shiftKey: true });
+  fireEvent.pointerMove(svg, { buttons: 1, pointerId: 4, clientX: 100, clientY: 120, shiftKey: true });
+  fireEvent.pointerUp(svg, { pointerId: 4, clientX: 70, clientY: 90, shiftKey: true });
+  expect(commit).not.toHaveBeenCalled();
+});

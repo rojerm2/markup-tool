@@ -43,3 +43,10 @@ export function fitScale(page: Size, available: Size, mode: "page" | "width"): n
   const width = Math.max(1, available.width) / page.width;
   return mode === "width" ? width : Math.min(width, Math.max(1, available.height) / page.height);
 }
+
+// Convert a raw PDF width through the viewport, including rotation and UserUnit.
+export function pdfWidthToViewport(width: number, viewport: PageViewport): number {
+  const origin = pdfToViewport({ x: 0, y: 0 }, viewport);
+  const unit = pdfToViewport({ x: 1, y: 0 }, viewport);
+  return width * Math.hypot(unit.x - origin.x, unit.y - origin.y);
+}

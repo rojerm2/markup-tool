@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
-import { clientToPdf, pdfToViewport, type PageViewport, type Point } from '../../services/coordinates';
+import { clientToPdf, pdfToViewport, pdfWidthToViewport, type PageViewport, type Point } from '../../services/coordinates';
+import { DEFAULT_DRAWING, type DrawingStyle } from './DrawingControls';
 import type { Highlight } from '../../types/annotation';
 
-type Props = { page: number; viewport: PageViewport; annotations: Highlight[]; onCommit: (stroke: Highlight) => void };
+type Props = { page: number; viewport: PageViewport; annotations: Highlight[]; onCommit: (stroke: Highlight) => void; style?: DrawingStyle };
 
-export default function AnnotationOverlay({ page, viewport, annotations, onCommit }: Props) {
+export default function AnnotationOverlay({ page, viewport, annotations, onCommit, style = DEFAULT_DRAWING }: Props) {
   const svg = useRef<SVGSVGElement>(null);
-  const draft = useRef<{ pointer: number; stroke: Highlight } | null>(null);
+  const draft = useRef<{ pointer: number; stroke: Highlight; samples: Point[] } | null>(null);
   const [preview, setPreview] = useState<Highlight | null>(null);
   function cancel() {
     const pointer = draft.current?.pointer;
@@ -16,9 +17,13 @@ export default function AnnotationOverlay({ page, viewport, annotations, onCommi
   }
   useEffect(() => {
     const surface = svg.current;
-    const key = (event: KeyboardEvent) => { if (event.code === 'Space' || event.code === 'Escape') cancel(); };
+    const key = (event: KeyboardEvent) => {
+      if (event.code === 'Space' || event.code === 'Escape') cancel();
+      if (event.key === 'Shift') projectDraft(event.type === 'keydown');
+    };
     const hidden = () => { if (document.hidden) cancel(); };
     window.addEventListener('keydown', key);
+    window.addEventListener('keyup', key);
     window.addEventListener('blur', cancel);
     window.addEventListener('scroll', cancel, true);
     document.addEventListener('visibilitychange', hidden);
@@ -27,6 +32,7 @@ export default function AnnotationOverlay({ page, viewport, annotations, onCommi
       draft.current = null;
       if (pointer !== undefined && surface?.hasPointerCapture(pointer)) surface.releasePointerCapture(pointer);
       window.removeEventListener('keydown', key);
+      window.removeEventListener('keyup', key);
       window.removeEventListener('blur', cancel);
       window.removeEventListener('scroll', cancel, true);
       document.removeEventListener('visibilitychange', hidden);
@@ -39,24 +45,38 @@ export default function AnnotationOverlay({ page, viewport, annotations, onCommi
     return clientToPdf({ x: Math.max(rect.left, Math.min(rect.right, event.clientX)),
       y: Math.max(rect.top, Math.min(rect.bottom, event.clientY)) }, rect, viewport);
   }
+  function projectDraft(straight: boolean) {
+    const active = draft.current;
+    if (!active) return;
+    const samples = active.samples;
+    active.stroke = { ...active.stroke, points: straight && samples.length > 1
+      ? [samples[0], samples[samples.length - 1]] : [...samples] };
+    setPreview(active.stroke);
+  }
   function append(event: PointerEvent<SVGSVGElement>) {
     const active = draft.current;
     if (!active || active.pointer !== event.pointerId) return;
-    const next = point(event), last = active.stroke.points[active.stroke.points.length - 1];
-    if (next.x !== last.x || next.y !== last.y) active.stroke = { ...active.stroke, points: [...active.stroke.points, next] };
-    setPreview(active.stroke);
+    const next = point(event), last = active.samples[active.samples.length - 1];
+    if (next.x !== last.x || next.y !== last.y) active.samples.push(next);
+    projectDraft(event.shiftKey);
   }
-  const origin = pdfToViewport({ x: 0, y: 0 }, viewport);
-  const unit = pdfToViewport({ x: 1, y: 0 }, viewport);
-  const widthScale = Math.hypot(unit.x - origin.x, unit.y - origin.y);
+  // First occurrence fixes layer order; preview joins its existing color/opacity layer.
+  const groups = new Map<string, Highlight[]>();
+  for (const stroke of [...annotations, ...(preview ? [preview] : [])]) {
+    const key = `${stroke.color.toLowerCase()}:${stroke.opacity}`;
+    const group = groups.get(key) ?? [];
+    group.push(stroke);
+    groups.set(key, group);
+  }
+
   return <svg ref={svg} className="annotation-overlay" aria-label={`Highlights for page ${page}`}
     width={viewport.width} height={viewport.height} viewBox={`0 0 ${viewport.width} ${viewport.height}`}
     onPointerDown={event => {
       if (event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || draft.current) return;
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
-      const stroke: Highlight = { id: crypto.randomUUID(), page, type: 'freehand', points: [point(event)], color: '#facc15', width: 10, opacity: 0.4 };
-      draft.current = { pointer: event.pointerId, stroke }; setPreview(stroke);
+      const stroke: Highlight = { id: crypto.randomUUID(), page, type: 'freehand', points: [point(event)], ...style };
+      draft.current = { pointer: event.pointerId, stroke, samples: [...stroke.points] }; setPreview(stroke);
     }}
     onPointerMove={event => { if (draft.current?.pointer === event.pointerId && event.buttons === 0) cancel(); else append(event); }}
     onPointerUp={event => {
@@ -64,13 +84,15 @@ export default function AnnotationOverlay({ page, viewport, annotations, onCommi
       append(event);
       const stroke = draft.current.stroke;
       cancel();
-      if (stroke.points.length > 1) onCommit(stroke);
+      if (stroke.points.some(p => p.x !== stroke.points[0].x || p.y !== stroke.points[0].y)) onCommit(stroke);
     }}
     onPointerCancel={cancel} onLostPointerCapture={cancel}>
-    {[...annotations, ...(preview ? [preview] : [])].map(stroke => <polyline key={stroke.id}
+    {[...groups].map(([key, strokes]) => <g key={key} opacity={strokes[0].opacity} data-highlight-layer={key}>
+      {strokes.map(stroke => <polyline key={stroke.id}
       data-annotation-id={stroke.id} data-draft={stroke === preview ? 'true' : undefined}
       points={stroke.points.map(p => { const v = pdfToViewport(p, viewport); return `${v.x},${v.y}`; }).join(' ')}
-      fill="none" stroke={stroke.color} strokeWidth={stroke.width * widthScale} opacity={stroke.opacity}
+      fill="none" stroke={stroke.color} strokeWidth={pdfWidthToViewport(stroke.width, viewport)}
       strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />)}
+    </g>)}
   </svg>;
 }

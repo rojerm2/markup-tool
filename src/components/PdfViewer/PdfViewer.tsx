@@ -61,7 +61,7 @@ export default function PdfViewer({ file }: Props) {
 
   if (!file) {
     return (
-      <div className="flex flex-1 items-center justify-center text-gray-200">
+      <div className="flex flex-1 items-center justify-center text-slate-600">
         No PDF selected.
       </div>
     );
@@ -69,7 +69,7 @@ export default function PdfViewer({ file }: Props) {
 
   if (isLoading) {
     return (
-      <div className="flex flex-1 items-center justify-center text-gray-200">
+      <div className="flex flex-1 items-center justify-center text-slate-600">
         Loading PDF...
       </div>
     );
@@ -77,7 +77,7 @@ export default function PdfViewer({ file }: Props) {
 
   if (error) {
     return (
-      <div role="alert" className="flex flex-1 items-center justify-center text-red-300">
+      <div role="alert" className="flex flex-1 items-center justify-center text-red-700">
         {error}
       </div>
     );

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { expect, it } from "vitest";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
-import { clientToPdf, pdfToClient, pdfToViewport, viewportToPdf, fitScale } from "../src/services/coordinates";
+import { clientToPdf, pdfToClient, pdfToViewport, viewportToPdf, fitScale, pdfWidthToViewport } from "../src/services/coordinates";
 
 // A tiny two-page vector PDF built without an additional PDF-writing dependency.
 function fixture(rotation = 90, cropped = false, userUnit = 1) {
@@ -82,6 +82,9 @@ it("uses PDF UserUnit and rotated crop dimensions when fitting a sheet", async (
     const page = await (await task.promise).getPage(2);
     const viewport = page.getViewport({ scale: 1 });
     expect([viewport.width, viewport.height]).toEqual([200, 400]);
+    for (const scale of [.1, 1, 2, 8]) {
+      expect(pdfWidthToViewport(20, page.getViewport({ scale }))).toBeCloseTo(40 * scale);
+    }
     expect(pdfToViewport({ x: 40, y: 50 }, viewport)).toEqual({ x: 40, y: 40 });
     expect(fitScale(viewport, { width: 600, height: 400 }, "page")).toBe(1);
     expect(fitScale(viewport, { width: 600, height: 400 }, "width")).toBe(3);

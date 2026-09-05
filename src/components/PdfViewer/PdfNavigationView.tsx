@@ -7,10 +7,13 @@ import { useSpacePan } from "./useSpacePan";
 import AnnotationOverlay from "../Annotations/AnnotationOverlay";
 import type { Highlight } from "../../types/annotation";
 
+import DrawingControls, { DEFAULT_DRAWING } from "../Annotations/DrawingControls";
+
 const GUTTER = 32;
 const LABEL_HEIGHT = 28;
 
 export default function PdfNavigationView({ pages }: { pages: PDFPageProxy[] }) {
+  const [drawing, setDrawing] = useState(DEFAULT_DRAWING);
   const [annotations, setAnnotations] = useState<Highlight[]>([]);
   const host = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
@@ -155,9 +158,9 @@ export default function PdfNavigationView({ pages }: { pages: PDFPageProxy[] }) 
       <button aria-pressed={mode === "page"} onClick={() => fit("page")}>Fit to page</button>
       <button aria-pressed={mode === "width"} onClick={() => fit("width")}>Fit to width</button>
       </div>
-      <span className="tool-status">Highlight active</span>
-      <span id="pan-hint">Drag to highlight · Space + drag to pan · Ctrl + wheel to zoom · Highlights are temporary</span>
+
     </div>
+    <DrawingControls value={drawing} onChange={setDrawing} />
     <div ref={host} {...pan} className={`pdf-scroll ${pan.className}`} tabIndex={0}
       role="region" aria-label="PDF pages" aria-describedby="pan-hint" onScroll={updateCurrent}>
       <div className="pdf-pages">
@@ -165,7 +168,7 @@ export default function PdfNavigationView({ pages }: { pages: PDFPageProxy[] }) 
           const viewport = page.getViewport({ scale: scales[index] });
           return <div key={page.pageNumber} data-page={page.pageNumber} style={{ width: viewport.width, minHeight: viewport.height + LABEL_HEIGHT }}>
             <PdfPage page={page} scale={scales[index]}>
-              <AnnotationOverlay page={page.pageNumber} viewport={viewport}
+              <AnnotationOverlay page={page.pageNumber} viewport={viewport} style={drawing}
                 annotations={annotations.filter(stroke => stroke.page === page.pageNumber)}
                 onCommit={stroke => setAnnotations(previous => [...previous, stroke])} />
             </PdfPage>
@@ -173,5 +176,6 @@ export default function PdfNavigationView({ pages }: { pages: PDFPageProxy[] }) 
         })}
       </div>
     </div>
+    <footer id="pan-hint">Drag to highlight · Shift for straight line · Space + drag to pan · Ctrl + wheel to zoom <span>Temporary session</span></footer>
   </div>;
 }

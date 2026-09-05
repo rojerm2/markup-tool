@@ -196,3 +196,31 @@ it('retains page-specific vectors through navigation, zoom and fit resize', () =
   act(() => { width = 632; resize(); });
   expect(line().getAttribute('points')).toBe('40,50 80,90');
 });
+
+it('applies selected palette and width to new vectors, retaining old styling across zoom and resize', () => {
+  vi.spyOn(SVGElement.prototype, 'getBoundingClientRect').mockImplementation(function(this: SVGElement) {
+    return this.closest('[data-page]')!.querySelector('canvas')!.getBoundingClientRect();
+  });
+  render(<PdfNavigationView pages={[page(1)]} />);
+  fireEvent.click(screen.getByRole('button', { name: '100%' }));
+  const svg = screen.getByLabelText('Highlights for page 1');
+  const draw = () => {
+    const bounds = svg.getBoundingClientRect();
+    fireEvent.pointerDown(svg, { button: 0, pointerId: 4, clientX: bounds.left + 40, clientY: bounds.top + 50 });
+    fireEvent.pointerUp(svg, { pointerId: 4, clientX: bounds.left + 80, clientY: bounds.top + 90 });
+  };
+  draw();
+  fireEvent.click(screen.getByRole('button', { name: 'Thick' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Blue' }));
+  expect(screen.getByRole('button', { name: 'Blue' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('button', { name: 'Yellow' }).getAttribute('aria-pressed')).toBe('false');
+  expect(screen.getByRole('button', { name: 'Thick' }).getAttribute('aria-pressed')).toBe('true');
+  draw();
+  const lines = () => [...svg.querySelectorAll('polyline')];
+  expect(lines().map(p => [p.getAttribute('stroke'), p.getAttribute('stroke-width')])).toEqual([['#facc15', '10'], ['#38bdf8', '20']]);
+  fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+  expect(lines().map(p => p.getAttribute('stroke-width'))).toEqual(['12.5', '25']);
+  fireEvent.click(screen.getByRole('button', { name: 'Fit to width' }));
+  act(() => { width = 632; resize(); });
+  expect(lines().map(p => p.getAttribute('stroke-width'))).toEqual(['10', '20']);
+});

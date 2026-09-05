@@ -30,13 +30,13 @@ function App() {
   };
 
   return (
-    <main className="flex h-screen flex-col bg-slate-800 text-white">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700 px-4 py-3">
-        <h1 className="text-lg font-semibold text-slate-100">PDF Floor Plan Markup</h1>
+    <main className="app-shell">
+      <header className="app-header">
+        <h1 >PDF Floor Plan Markup</h1>
         <Toolbar onOpenPdf={handleOpenPdf} opening={opening} />
       </header>
       {error && <p role="alert" className="p-3 text-white bg-red-900">{error}</p>}
-      {pdfPath && <p className="truncate px-4 py-1" title={pdfPath}>{pdfPath.split(/[\\/]/).pop()}</p>}
+      {pdfPath && <p className="document-name" title={pdfPath}>{pdfPath.split(/[\\/]/).pop()}</p>}
       <PdfViewer key={revision} file={pdfPath} />
     </main>
   );
