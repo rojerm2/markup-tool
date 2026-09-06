@@ -7,8 +7,8 @@ GlobalWorkerOptions.workerSrc = new URL(
 
 // Preserve the native picker's path, including spaces and UNC shares.
 // The caller owns this document until it aborts the supplied signal.
-export async function loadDocument(filePath: string, signal: AbortSignal) {
-  const bytes = await readFile(filePath);
+export async function loadDocument(filePath: string, signal: AbortSignal, suppliedBytes?: Uint8Array) {
+  const bytes = suppliedBytes ?? await readFile(filePath);
   signal.throwIfAborted();
   const assets = new URL(`${import.meta.env.BASE_URL}pdfjs/`, window.location.href);
   const task = getDocument({

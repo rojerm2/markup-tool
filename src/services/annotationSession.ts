@@ -14,6 +14,7 @@ export const emptySession: AnnotationSession = {
 export function legendNameError(legends: Legend[], name: string, exceptId?: string): string | null {
   const trimmed = name.trim();
   if (!trimmed) return 'Enter a legend name.';
+  if (trimmed.length > 256 || /[\u0000-\u001f]/.test(trimmed)) return 'Use up to 256 characters without control characters.';
   if (legends.some(legend => legend.id !== exceptId && legend.name.toLowerCase() === trimmed.toLowerCase()))
     return 'A legend with this name already exists.';
   return null;

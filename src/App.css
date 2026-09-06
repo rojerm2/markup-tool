@@ -62,3 +62,18 @@ button[aria-pressed="true"] { background: #bfdbfe; color: #172554; border-color:
   .app-header { padding: 8px 10px; }
   .app-header h1 { font-size: 13px; }
 }
+.project-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.project-workspace { display: flex; flex: 1; min-height: 0; }
+.project-error { padding: 6px 16px; color: #b91c1c; max-height: 90px; overflow: auto; }
+.empty-document { margin: auto; }
+dialog { border: 1px solid #cbd5e1; border-radius: 8px; padding: 20px; max-width: min(440px, 90vw); color: #263244; }
+dialog::backdrop { background: #0f172a66; }
+dialog h2 { font-weight: 650; } dialog p { margin: 10px 0 16px; }
+@media (max-width: 700px) { .app-header { flex-wrap: wrap; gap: 4px; } .app-header h1 { margin: 0; } }
+@media (max-width: 550px) {
+  .app-header > .project-actions { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; }
+}
+@media (max-width: 550px) {
+  .drawing-controls { flex-wrap: nowrap; overflow-x: auto; flex-shrink: 0; }
+  .drawing-controls .control-group { flex-wrap: nowrap; flex-shrink: 0; }
+}

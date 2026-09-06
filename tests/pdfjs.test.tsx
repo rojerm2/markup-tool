@@ -91,3 +91,23 @@ it("uses PDF UserUnit and rotated crop dimensions when fitting a sheet", async (
     expect(fitScale({ width: 100000, height: 100000 }, { width: 600, height: 400 }, "page")).toBe(0.004);
   } finally { await task.destroy(); }
 });
+
+it('serialized vectors retain independently expected crop/rotation/UserUnit alignment at multiple zooms', async () => {
+  const { parseProject, serializeProject } = await import('../src/services/projectFormat');
+  const { emptySession } = await import('../src/services/annotationSession');
+  for (const rotation of [0,90,180,270]) {
+    const task = getDocument({data:fixture(rotation,true,2)});
+    try {
+      const pdf=await task.promise, page=await pdf.getPage(2);
+      const restored=parseProject(serializeProject({reference:'floor.pdf',filename:'floor.pdf',sha256:'a'.repeat(64),size:123,pages:2},
+        {...emptySession,annotations:[{id:'stable',legendId:null,page:2,type:'freehand',points:[{x:20,y:30},{x:220,y:130}],width:10,color:'#facc15',opacity:0.4}]}));
+      const stroke=restored.session.annotations[0];
+      const expected: Record<number, number[][]>={0:[[0,200],[400,0]],90:[[0,0],[200,400]],180:[[400,0],[0,200]],270:[[200,400],[0,0]]};
+      for (const scale of [0.1,1,2,8]) {
+        const viewport=page.getViewport({scale});
+        stroke.points.forEach((point,i)=>{const projected=pdfToViewport(point,viewport); expect(projected.x).toBeCloseTo(expected[rotation][i][0]*scale); expect(projected.y).toBeCloseTo(expected[rotation][i][1]*scale);});
+        expect(pdfWidthToViewport(stroke.width,viewport)).toBeCloseTo(20*scale);
+      }
+    } finally {await task.destroy();}
+  }
+});

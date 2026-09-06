@@ -9,7 +9,16 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { loadDocument } from "../src/services/pdfService";
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 vi.mock("../src/services/pdfService", () => ({ loadDocument: vi.fn() }));
+vi.mock('../src/services/projectService', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/services/projectService')>();
+  return { ...actual, loadSource: async (path: string, signal: AbortSignal) => {
+    const pdf = await loadDocument(path, signal);
+    return { pages: await Promise.all(Array.from({length: pdf.numPages}, (_, i) => pdf.getPage(i + 1))),
+      source: { reference: path, filename: path, sha256: 'a'.repeat(64), size: 123, pages: pdf.numPages } };
+  } };
+});
 beforeEach(() => {
+  HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -27,10 +36,10 @@ describe("PDF opening", () => {
     vi.mocked(open).mockResolvedValueOnce(null).mockRejectedValueOnce(new Error("picker unavailable"));
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Open PDF" }));
-    await waitFor(() => expect(screen.getByRole("button").hasAttribute("disabled")).toBe(false));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Open PDF" }).hasAttribute("disabled")).toBe(false));
     expect(loadDocument).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Open PDF" }));
-    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Could not open file picker: picker unavailable");
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "picker unavailable Please retry or choose another file.");
   });
   it("allows the same path to be retried after a load failure", async () => {
     vi.mocked(open).mockResolvedValue("C:\\Plans\\floor.pdf");
@@ -98,10 +107,12 @@ it('resets legends, active selection and vectors on document replacement while p
   const vector = svg.querySelector('polyline')!.outerHTML;
   expect(vector).toContain('40,50 80,50');
   fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Open PDF' }).hasAttribute('disabled')).toBe(false));
   expect(screen.getByLabelText('Active legend').textContent).toBe('Active: Walls');
   expect(svg.querySelector('polyline')!.outerHTML).toBe(vector);
   fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
   await waitFor(() => expect(loadDocument).toHaveBeenCalledTimes(2));
   await screen.findByLabelText('PDF page 1');
   expect(screen.getByLabelText('Active legend').textContent).toBe('Unassigned · Manual color');

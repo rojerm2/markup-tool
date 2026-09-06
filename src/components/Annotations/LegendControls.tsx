@@ -44,7 +44,7 @@ export default function LegendControls({ session, dispatch }: { session: Annotat
       </div>
       <p id={`${formId}-delete`} className="legend-note">Deleting a legend keeps its strokes and colors, and makes them unassigned.</p>
       <form onSubmit={submit} className="legend-form">
-        <label>{editing ? 'Rename legend' : 'New legend'}<input aria-label="Legend name" value={name}
+        <label>{editing ? 'Rename legend' : 'New legend'}<input aria-label="Legend name" maxLength={256} value={name}
           aria-invalid={!!error} aria-describedby={error ? errorId : undefined}
           onChange={event => { setName(event.target.value); setError(null); }} /></label>
         {!editing && <div className="control-group" role="group" aria-label="New legend color">

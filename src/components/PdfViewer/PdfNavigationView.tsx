@@ -7,13 +7,14 @@ import { useSpacePan } from "./useSpacePan";
 import AnnotationOverlay from "../Annotations/AnnotationOverlay";
 import DrawingControls from "../Annotations/DrawingControls";
 import LegendControls from "../Annotations/LegendControls";
-import { emptySession, sessionReducer } from "../../services/annotationSession";
+import { emptySession, sessionReducer, type AnnotationSession, type SessionAction } from "../../services/annotationSession";
 
 const GUTTER = 32;
 const LABEL_HEIGHT = 28;
 
-export default function PdfNavigationView({ pages }: { pages: PDFPageProxy[] }) {
-  const [session, dispatch] = useReducer(sessionReducer, emptySession);
+export default function PdfNavigationView({ pages, session: controlled, onAction }: { pages: PDFPageProxy[]; session?: AnnotationSession; onAction?: (action: SessionAction) => void }) {
+  const [local, localDispatch] = useReducer(sessionReducer, emptySession);
+  const session = controlled ?? local, dispatch = onAction ?? localDispatch;
   const { drawing, annotations, activeLegendId } = session;
   const host = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
@@ -177,6 +178,6 @@ export default function PdfNavigationView({ pages }: { pages: PDFPageProxy[] }) 
         })}
       </div>
     </div>
-    <footer id="pan-hint">Drag to highlight · Shift for straight line · Space + drag to pan · Ctrl + wheel to zoom <span>Temporary session</span></footer>
+    <footer id="pan-hint">Drag to highlight · Shift for straight line · Space + drag to pan · Ctrl + wheel to zoom <span>Editable vectors</span></footer>
   </div>;
 }
