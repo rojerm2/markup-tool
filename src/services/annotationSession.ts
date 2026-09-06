@@ -25,10 +25,45 @@ export type SessionAction =
   | { type: 'delete'; id: string }
   | { type: 'select'; id: string | null }
   | { type: 'drawing'; drawing: DrawingStyle; manual: boolean }
+  | { type: 'remove-stroke'; id: string }
+  | { type: 'edit-stroke'; id: string; edit: { legendId: string | null } | { color: string } | { width: number } }
+  | { type: 'move-stroke'; before: Highlight; points: Highlight['points']; legends: Legend[] }
   | { type: 'commit'; stroke: Highlight };
 
 export function sessionReducer(state: AnnotationSession, action: SessionAction): AnnotationSession {
   switch (action.type) {
+    case 'remove-stroke':
+      return state.annotations.some(s => s.id === action.id)
+        ? { ...state, annotations: state.annotations.filter(s => s.id !== action.id) } : state;
+    case 'edit-stroke': {
+      const before = state.annotations.find(s => s.id === action.id);
+      if (!before) return state;
+      let after: Highlight;
+      if ('legendId' in action.edit) {
+        const id = action.edit.legendId;
+        const legend = state.legends.find(l => l.id === id);
+        if (action.edit.legendId !== null && !legend) return state;
+        after = { ...before, legendId: legend?.id ?? null, color: legend?.color ?? before.color };
+      } else if ('color' in action.edit) {
+        if (!/^#[0-9a-f]{6}$/.test(action.edit.color)) return state;
+        after = { ...before, color: action.edit.color, legendId: null };
+      } else {
+        if (!Number.isFinite(action.edit.width) || action.edit.width < .01 || action.edit.width > 10000) return state;
+        after = { ...before, width: action.edit.width };
+      }
+      return before.legendId === after.legendId && before.color === after.color && before.width === after.width ? state
+        : { ...state, annotations: state.annotations.map(s => s === before ? after : s) };
+    }
+    case 'move-stroke': {
+      // Reference guards also reject change-then-revert and deleted/recreated IDs.
+      if (state.legends !== action.legends || !state.annotations.includes(action.before)
+        || action.points.length !== action.before.points.length) return state;
+      const dx = action.points[0].x-action.before.points[0].x, dy = action.points[0].y-action.before.points[0].y;
+      if ((!dx && !dy) || action.points.some((p, i) => !Number.isFinite(p.x) || !Number.isFinite(p.y)
+        || Math.abs(p.x) > 1e9 || Math.abs(p.y) > 1e9
+        || Math.abs(p.x-(action.before.points[i].x+dx)) > 1e-7 || Math.abs(p.y-(action.before.points[i].y+dy)) > 1e-7)) return state;
+      return { ...state, annotations: state.annotations.map(s => s === action.before ? { ...s, points: action.points } : s) };
+    }
     case 'create':
       if (state.legends.some(item => item.id === action.legend.id) || legendNameError(state.legends, action.legend.name)) return state;
       return { ...state, legends: [...state.legends, { ...action.legend, name: action.legend.name.trim() }],

@@ -77,3 +77,10 @@ dialog h2 { font-weight: 650; } dialog p { margin: 10px 0 16px; }
   .drawing-controls { flex-wrap: nowrap; overflow-x: auto; flex-shrink: 0; }
   .drawing-controls .control-group { flex-wrap: nowrap; flex-shrink: 0; }
 }
+
+.annotation-tools { display: flex; align-items: center; flex-shrink: 0; overflow-x: auto; border-bottom: 1px solid #e2e8f0; }
+.annotation-tools .drawing-controls { border: 0; flex-shrink: 0; }
+.tool-modes, .editing-controls { display: flex; align-items: center; gap: 6px; padding: 6px 10px; flex-shrink: 0; white-space: nowrap; }
+.editing-controls select { max-width: 155px; padding: 5px; border: 1px solid #cbd5e1; border-radius: 5px; background: white; }
+.annotation-overlay.is-editing { cursor: default; }
+.annotation-tools :focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }

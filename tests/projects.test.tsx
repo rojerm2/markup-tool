@@ -128,3 +128,83 @@ it('save excludes active draft; a later completed gesture remains dirty until th
   expect(saved.session.annotations).toHaveLength(1); expect(saved.session.annotations[0].points).toHaveLength(3);
 });
 
+
+async function openEditable() {
+  const session={...structuredClone(emptySession),legends:[{id:'walls',name:'Walls',color:'#facc15'},{id:'doors',name:'Doors',color:'#facc15'}],
+    annotations:[{id:'one',page:1,type:'freehand',legendId:'walls',color:'#facc15',width:10,opacity:.4,points:[{x:40,y:750},{x:120,y:750}]},
+      {id:'two',page:2,type:'freehand',legendId:'doors',color:'#facc15',width:10,opacity:.4,points:[{x:50,y:700},{x:70,y:710},{x:90,y:700}]},
+      {id:'three',page:1,type:'freehand',legendId:null,color:'#facc15',width:10,opacity:.4,points:[{x:40,y:650},{x:120,y:650}]}]};
+  const project=parseProject(JSON.stringify({format:'pdf-markup-project',version:1,source,session}));
+  vi.mocked(files.readProject).mockResolvedValue({path:'C:\\plans\\one.pmarkup',project});
+  vi.mocked(files.resolveSource).mockResolvedValue(source.reference);
+  render(<App/>);click('Open Project');await screen.findByLabelText('PDF page 2');await idle();
+  click('Select/Edit');
+  return project;
+}
+function selected(id:string) {fireEvent.change(screen.getByLabelText('Selected stroke'),{target:{value:id}});}
+function editPointer(page=1) {
+  const svg=screen.getByLabelText(`Highlights for page ${page}`);
+  Object.assign(svg,{setPointerCapture(){},hasPointerCapture:()=>false,getBoundingClientRect:()=>({left:0,top:0,right:600,bottom:800,width:600,height:800})});
+  return (type:string,x:number,y=50)=>fireEvent(svg,Object.assign(new MouseEvent(type,{bubbles:true,button:0,buttons:type==='pointerup'?0:1,clientX:x,clientY:y}),{pointerId:7}));
+}
+it('M7 full App saves/reopens moved, reassigned, manual, resized and deleted multi-page strokes, then deletes the last edited stroke',async()=>{
+  const original=await openEditable();selected('one');
+  fireEvent.change(screen.getByLabelText('Selected stroke legend'),{target:{value:'doors'}});
+  fireEvent.change(screen.getByLabelText('Selected stroke width'),{target:{value:'20'}});
+  const pointer=editPointer();pointer('pointerdown',80);pointer('pointermove',110,70);pointer('pointerup',110,70);
+  selected('two');click('Selected stroke Yellow');
+  selected('three');click('Delete stroke');
+  click('Save Project');await idle();
+  const saved=parseProject(vi.mocked(files.writeProject).mock.calls[0][2]);
+  expect(saved.session.annotations).toEqual([
+    {...original.session.annotations[0],legendId:'doors',width:20,points:[{x:70,y:730},{x:150,y:730}]},
+    {...original.session.annotations[1],legendId:null}]);
+  expect(saved.session.drawing).toEqual(original.session.drawing);
+  vi.mocked(files.readProject).mockResolvedValueOnce({path:'C:\\plans\\one.pmarkup',project:saved});click('Open Project');await idle();
+  expect(screen.getByRole('button',{name:'Highlight',exact:true}).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.queryByLabelText('Selected stroke')).toBeNull();click('Select/Edit');selected('two');
+  expect((screen.getByLabelText('Selected stroke legend') as HTMLSelectElement).value).toBe('');
+  click('Delete stroke');selected('one');click('Selected stroke Blue');click('Delete stroke');
+  expect(screen.getByRole('button',{name:'Delete stroke'}).hasAttribute('disabled')).toBe(true);
+  click('Save Project');await idle();expect(parseProject(vi.mocked(files.writeProject).mock.calls[1][2]).session.annotations).toEqual([]);
+});
+it('M7 save during movement snapshots committed geometry; later move and property commits stay dirty',async()=>{
+  await openEditable();selected('one');const pointer=editPointer();
+  pointer('pointerdown',80);pointer('pointermove',110,70);
+  const pendingSave=deferred<string|null>();vi.mocked(files.writeProject).mockReturnValueOnce(pendingSave.promise);click('Save Project');
+  const snapshot=parseProject(vi.mocked(files.writeProject).mock.calls[0][2]);expect(snapshot.session.annotations[0].points[0]).toEqual({x:40,y:750});
+  pointer('pointerup',110,70);fireEvent.change(screen.getByLabelText('Selected stroke width'),{target:{value:'20'}});
+  await act(async()=>pendingSave.resolve('C:\\plans\\one.pmarkup'));await idle();expect(status()).toContain('Unsaved changes');
+  click('Save Project');await idle();const saved=parseProject(vi.mocked(files.writeProject).mock.calls[1][2]);
+  expect(saved.session.annotations[0].points[0]).toEqual({x:70,y:730});expect(saved.session.annotations[0].width).toBe(20);
+  expect(status()).toContain('Saved');
+});
+it('M7 keyboard selects via controls, protects typing/dialogs and limits Delete to edit context',async()=>{
+  await openEditable();selected('one');const region=screen.getByLabelText('PDF pages');
+  for(const name of ['Selected stroke','Selected stroke legend','Selected stroke width','Page number']) {
+    const control=screen.getByLabelText(name);fireEvent.keyDown(control,{key:'Delete'});fireEvent.keyDown(control,{key:'Backspace'});
+  }
+  expect(screen.getByLabelText('Selected stroke').querySelectorAll('option')).toHaveLength(4);
+  fireEvent.keyDown(document.body,{key:'Delete'});expect(screen.getByLabelText('Selected stroke').querySelectorAll('option')).toHaveLength(4);
+  fireEvent.keyDown(region,{key:'Escape',code:'Escape'});expect((screen.getByLabelText('Selected stroke') as HTMLSelectElement).value).toBe('');
+  selected('one');fireEvent(region,new MouseEvent('pointerdown',{bubbles:true,button:0}));
+  expect((screen.getByLabelText('Selected stroke') as HTMLSelectElement).value).toBe('');
+  selected('one');click('Highlight');fireEvent.keyDown(region,{key:'Delete'});click('Select/Edit');
+  expect(screen.getByLabelText('Selected stroke').querySelectorAll('option')).toHaveLength(4);
+  selected('one');fireEvent.keyDown(region,{key:'Backspace'});expect(screen.getByLabelText('Selected stroke').querySelectorAll('option')).toHaveLength(3);
+  selected('three');click('Open PDF');fireEvent.keyDown(screen.getByRole('button',{name:'Cancel',exact:true}),{key:'Delete'});click('Cancel');await idle();
+  expect(screen.getByLabelText('Selected stroke').querySelectorAll('option')).toHaveLength(3);
+  click('Legends (2)');fireEvent.keyDown(screen.getByLabelText('Legend name'),{key:'Delete'});
+  const space=new KeyboardEvent('keydown',{key:' ',code:'Space',bubbles:true,cancelable:true});fireEvent(screen.getByLabelText('Legend name'),space);expect(space.defaultPrevented).toBe(false);
+  click('Delete legend Walls');expect((screen.getByLabelText('Selected stroke legend') as HTMLSelectElement).value).toBe('');
+});
+it('M7 open/close freeze and abandon movement even when a cancelled transition returns to the same session',async()=>{
+  await openEditable();selected('one');click('Selected stroke Blue');const pointer=editPointer();
+  pointer('pointerdown',80);pointer('pointermove',110,70);click('Open PDF');
+  pointer('pointerup',110,70);click('Cancel');await idle();pointer('pointerup',110,70);
+  selected('one');const second=editPointer();second('pointerdown',80);second('pointermove',140,80);
+  act(()=>native.close!({preventDefault:vi.fn()}));second('pointerup',140,80);click('Cancel');await idle();
+  click('Save Project');await idle();const saved=parseProject(vi.mocked(files.writeProject).mock.calls[0][2]);
+  expect(saved.session.annotations[0]).toMatchObject({color:'#38bdf8',points:[{x:40,y:750},{x:120,y:750}]});
+  expect(native.destroy).not.toHaveBeenCalled();
+});

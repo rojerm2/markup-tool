@@ -7,21 +7,45 @@ import { useSpacePan } from "./useSpacePan";
 import AnnotationOverlay from "../Annotations/AnnotationOverlay";
 import DrawingControls from "../Annotations/DrawingControls";
 import LegendControls from "../Annotations/LegendControls";
+import EditingControls from "../Annotations/EditingControls";
+import { isEditingControl } from '../../services/annotationEditing';
 import { emptySession, sessionReducer, type AnnotationSession, type SessionAction } from "../../services/annotationSession";
 
 const GUTTER = 32;
 const LABEL_HEIGHT = 28;
 
-export default function PdfNavigationView({ pages, session: controlled, onAction }: { pages: PDFPageProxy[]; session?: AnnotationSession; onAction?: (action: SessionAction) => void }) {
+export default function PdfNavigationView({ pages, session: controlled, onAction, disabled = false }: { pages: PDFPageProxy[]; session?: AnnotationSession; onAction?: (action: SessionAction) => void; disabled?: boolean }) {
   const [local, localDispatch] = useReducer(sessionReducer, emptySession);
   const session = controlled ?? local, dispatch = onAction ?? localDispatch;
   const { drawing, annotations, activeLegendId } = session;
+  const [tool, setTool] = useState<'highlight' | 'edit'>('highlight');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [viewRevision, setViewRevision] = useState(0);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (selectedId && !annotations.some(s => s.id === selectedId)) setSelectedId(null); }, [annotations, selectedId]);
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (disabled || tool !== 'edit') return;
+      if (event.key === 'Escape' && !(event.target instanceof Element && event.target.closest('dialog, [role="dialog"]'))) setSelectedId(null);
+      if (isEditingControl(event.target)) return;
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId
+        && event.target instanceof Node && root.current?.contains(event.target)) {
+        event.preventDefault(); dispatch({ type: 'remove-stroke', id: selectedId });
+      }
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [disabled, tool, selectedId, dispatch]);
   const host = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [current, setCurrent] = useState(1);
+  useEffect(() => {
+    if (selectedId && annotations.find(s => s.id === selectedId)?.page !== current) setSelectedId(null);
+  }, [current]);
   const [pageInput, setPageInput] = useState("1");
   const [mode, setMode] = useState<ZoomMode>("page");
   const [zoom, setZoom] = useState(1);
+  useEffect(() => { setViewRevision(v => v+1); }, [size]);
   const anchor = useRef<{ page: number; point: Point; x: number; y: number } | null>(null);
   const pendingPage = useRef<number | null>(null);
   const pan = useSpacePan(host);
@@ -50,6 +74,8 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
   }
 
   function navigate(number: number) {
+    setViewRevision(v => v+1);
+    setSelectedId(null);
     if (!Number.isInteger(number) || number < 1 || number > pages.length) {
       setPageInput(String(current));
       return;
@@ -141,7 +167,13 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
     }
   }, [mode, zoom, size]);
 
-  return <div className="pdf-navigation">
+  function selectStroke(id: string | null) {
+    const stroke = annotations.find(s => s.id === id);
+    if (stroke && stroke.page !== current) navigate(stroke.page);
+    setSelectedId(stroke?.id ?? null);
+  }
+
+  return <div ref={root} className="pdf-navigation">
     <div className="pdf-controls" role="toolbar" aria-label="PDF navigation">
       <div className="control-group" role="group" aria-label="Pages">
       <button disabled={current === 1} onClick={() => navigate(current - 1)}>Previous page</button>
@@ -161,16 +193,27 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
       </div>
 
     </div>
-    <DrawingControls value={drawing} onChange={(drawing, manual) => dispatch({ type: 'drawing', drawing, manual })} />
+    <div className="annotation-tools">
+      <div className="tool-modes" role="group" aria-label="Annotation mode">
+        <button aria-pressed={tool === 'highlight'} onClick={() => { setTool('highlight'); setSelectedId(null); }}>Highlight</button>
+        <button aria-pressed={tool === 'edit'} onClick={() => setTool('edit')}>Select/Edit</button>
+      </div>
+      {tool === 'highlight' ? <DrawingControls value={drawing} onChange={(drawing, manual) => dispatch({ type: 'drawing', drawing, manual })} />
+        : <EditingControls session={session} selectedId={selectedId} onSelect={selectStroke} dispatch={dispatch} />}
+    </div>
     <LegendControls session={session} dispatch={dispatch} />
     <div ref={host} {...pan} className={`pdf-scroll ${pan.className}`} tabIndex={0}
-      role="region" aria-label="PDF pages" aria-describedby="pan-hint" onScroll={updateCurrent}>
+      role="region" aria-label="PDF pages" aria-describedby="pan-hint" onScroll={updateCurrent}
+      onPointerDown={event => {
+        if (tool === 'edit' && event.button === 0 && event.target instanceof Element && !event.target.closest('.annotation-overlay')) setSelectedId(null);
+      }}>
       <div className="pdf-pages">
         {pages.map((page, index) => {
           const viewport = page.getViewport({ scale: scales[index] });
           return <div key={page.pageNumber} data-page={page.pageNumber} style={{ width: viewport.width, minHeight: viewport.height + LABEL_HEIGHT }}>
             <PdfPage page={page} scale={scales[index]}>
               <AnnotationOverlay page={page.pageNumber} viewport={viewport} style={drawing} legendId={activeLegendId}
+                tool={tool} selectedId={selectedId} onSelect={setSelectedId} onAction={dispatch} legends={session.legends} disabled={disabled} viewRevision={viewRevision}
                 annotations={annotations.filter(stroke => stroke.page === page.pageNumber)}
                 onCommit={stroke => dispatch({ type: 'commit', stroke })} />
             </PdfPage>
@@ -178,6 +221,6 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
         })}
       </div>
     </div>
-    <footer id="pan-hint">Drag to highlight · Shift for straight line · Space + drag to pan · Ctrl + wheel to zoom <span>Editable vectors</span></footer>
+    <footer id="pan-hint">{tool === 'edit' ? 'Click or choose a stroke to edit · Drag to move · Escape clears selection' : 'Drag to highlight · Shift for straight line'} · Space + drag to pan · Ctrl + wheel to zoom <span>Editable vectors</span></footer>
   </div>;
 }

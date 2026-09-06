@@ -1,8 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent, type RefObject } from "react";
-
-function isControl(target: EventTarget | null) {
-  return target instanceof Element && !!target.closest("dialog, input, textarea, select, [contenteditable]:not([contenteditable='false'])");
-}
+import { isEditingControl as isControl } from '../../services/annotationEditing';
 
 export function useSpacePan(host: RefObject<HTMLDivElement | null>) {
   const [space, setSpace] = useState(false);

@@ -10,7 +10,7 @@ export const DEFAULT_DRAWING: DrawingStyle = { color: COLORS[0].value, width: 10
 
 export default function DrawingControls({ value, onChange }: { value: DrawingStyle; onChange: (value: DrawingStyle, manual: boolean) => void }) {
   return <div className="drawing-controls" role="toolbar" aria-label="Drawing controls">
-    <span className="tool-status">Highlighter</span>
+    <span className="tool-status">New strokes</span>
     <div className="control-group" role="group" aria-label="Stroke width">
       <span className="control-label">Width</span>
       {WIDTHS.map(width => <button key={width.value} aria-pressed={value.width === width.value}

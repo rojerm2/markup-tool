@@ -111,3 +111,28 @@ it('serialized vectors retain independently expected crop/rotation/UserUnit alig
     } finally {await task.destroy();}
   }
 });
+
+it.each([0,90,180,270])('moves with independent raw coordinates through real crop/UserUnit/rotation %i at multiple zooms',async rotation=>{
+  const { translatedHighlight }=await import('../src/services/annotationEditing');
+  const task=getDocument({data:fixture(rotation,true,2)});
+  try {
+    const page=await (await task.promise).getPage(2);
+    const stroke={id:'move',page:2,type:'freehand' as const,legendId:null,color:'#facc15',width:10,opacity:.4,points:[{x:40,y:50},{x:90.125,y:60.875},{x:75.25,y:90.5}]};
+    // Raw start (40,50) projects to these independently computed crop positions.
+    const start={0:[20,80],90:[20,20],180:[180,20],270:[80,180]}[rotation]!;
+    // Client translation +12,-8 corresponds to the following raw deltas / (zoom*UserUnit).
+    const delta={0:[12,8],90:[-8,12],180:[-12,-8],270:[8,-12]}[rotation]!;
+    for(const scale of [.1,1,2,8]) {
+      const viewport=page.getViewport({scale});const rect={left:31,top:-17,width:viewport.width,height:viewport.height};
+      // Scale the mouse translation so the raw expected result is identical at each zoom.
+      const end={x:rect.left+(start[0]+12)*scale*2,y:rect.top+(start[1]-8)*scale*2};
+      const moved=translatedHighlight(stroke,{x:40,y:50},end,rect,viewport);
+      moved.points.forEach((p,i)=>{expect(p.x).toBeCloseTo(stroke.points[i].x+delta[0],10);expect(p.y).toBeCloseTo(stroke.points[i].y+delta[1],10);});
+      expect(moved).toMatchObject({id:'move',page:2,type:'freehand',legendId:null,width:10,opacity:.4});
+      // A second move back uses the new committed snapshot, without quantizing coordinates.
+      const back=translatedHighlight(moved,{x:40+delta[0],y:50+delta[1]},
+        {x:rect.left+start[0]*scale*2,y:rect.top+start[1]*scale*2},rect,viewport);
+      back.points.forEach((p,i)=>{expect(p.x).toBeCloseTo(stroke.points[i].x,10);expect(p.y).toBeCloseTo(stroke.points[i].y,10);});
+    }
+  } finally {await task.destroy();}
+});

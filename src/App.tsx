@@ -115,7 +115,7 @@ export default function App() {
     {error && <p role="alert" className="project-error">{error}</p>}
     {notice && <p role="status" className="project-error">{notice}</p>}
     <div className="project-workspace" inert={operation === 'opening' || operation === 'closing'}>
-      {work ? <PdfNavigationView key={work.id} pages={work.pages} session={work.session} onAction={mutate} /> : <p className="empty-document">No PDF selected.</p>}
+      {work ? <PdfNavigationView key={work.id} pages={work.pages} session={work.session} onAction={mutate} disabled={operation === 'opening' || operation === 'closing'} /> : <p className="empty-document">No PDF selected.</p>}
     </div>
     {question && <DirtyDialog answer={answer} />}
   </main>;
