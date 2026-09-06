@@ -1,4 +1,4 @@
-import { useId, useState, type Dispatch, type FormEvent } from 'react';
+import { useEffect, useId, useState, type Dispatch, type FormEvent } from 'react';
 import { legendNameError, type AnnotationSession, type SessionAction } from '../../services/annotationSession';
 import { COLORS } from './DrawingControls';
 
@@ -11,6 +11,9 @@ export default function LegendControls({ session, dispatch }: { session: Annotat
   const formId = useId(), errorId = useId();
   const active = session.legends.find(item => item.id === session.activeLegendId);
   function reset() { setEditing(null); setName(''); setError(null); }
+  useEffect(() => {
+    if (editing && !session.legends.some(legend => legend.id === editing)) reset();
+  }, [editing, session.legends]);
   function submit(event: FormEvent) {
     event.preventDefault();
     const message = legendNameError(session.legends, name, editing ?? undefined);

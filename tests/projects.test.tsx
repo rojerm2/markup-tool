@@ -208,3 +208,67 @@ it('M7 open/close freeze and abandon movement even when a cancelled transition r
   expect(saved.session.annotations[0]).toMatchObject({color:'#38bdf8',points:[{x:40,y:750},{x:120,y:750}]});
   expect(native.destroy).not.toHaveBeenCalled();
 });
+
+const historyKey = (key='z', shiftKey=false, target: EventTarget=window) => fireEvent.keyDown(target, {key,ctrlKey:true,shiftKey});
+it('history traverses pending save snapshots, dirty equality and successful Save As without losing stacks',async()=>{
+ render(<App/>);await openPdf();create();click('Save Project');await idle();click('Thick');
+ const save=deferred<string|null>();vi.mocked(files.writeProject).mockReturnValueOnce(save.promise);click('Save As');
+ click('Undo');expect(status()).toContain('Saved');click('Redo');
+ await act(async()=>save.resolve('D:\\snapshot.pmarkup'));await idle();expect(status()).not.toContain('Unsaved changes');
+ click('Undo');expect(status()).toContain('Unsaved changes');historyKey('y');expect(status()).not.toContain('Unsaved changes');
+ click('Thin');expect(status()).toContain('Unsaved changes');historyKey();expect(status()).not.toContain('Unsaved changes');
+ click('Save Project');await idle();expect(vi.mocked(files.writeProject).mock.calls[2][0]).toBe('D:\\snapshot.pmarkup');
+ const saved=parseProject(vi.mocked(files.writeProject).mock.calls[2][2]);expect(Object.keys(saved.session).sort()).toEqual(['activeLegendId','annotations','drawing','legends']);
+ expect(screen.getByRole('button',{name:'Redo',exact:true}).hasAttribute('disabled')).toBe(false);
+});
+it('history survives cancelled/failed replacement and resets only on successful reopen',async()=>{
+ render(<App/>);await openPdf();create();click('Thick');click('Undo');
+ click('Open PDF');historyKey();expect(screen.getByRole('button',{name:'Undo',exact:true}).hasAttribute('disabled')).toBe(true);click('Cancel');await idle();
+ expect(screen.getByLabelText('Active legend').textContent).toContain('Walls');click('Redo');expect(screen.getByRole('button',{name:'Thick'}).getAttribute('aria-pressed')).toBe('true');
+ vi.mocked(files.choosePdf).mockResolvedValueOnce(null);click('Open PDF');click('Discard changes');await idle();click('Undo');
+ vi.mocked(files.loadSource).mockRejectedValueOnce(new Error('Broken'));click('Open PDF');click('Discard changes');await idle();click('Redo');
+ click('Save Project');await idle();const project=parseProject(vi.mocked(files.writeProject).mock.calls[0][2]);
+ vi.mocked(files.readProject).mockResolvedValue({path:'C:\\one.pmarkup',project});vi.mocked(files.resolveSource).mockResolvedValue(source.reference);
+ click('Open Project');await idle();expect(screen.getByRole('button',{name:'Undo',exact:true}).hasAttribute('disabled')).toBe(true);expect(screen.getByRole('button',{name:'Redo',exact:true}).hasAttribute('disabled')).toBe(true);
+});
+it('history shortcuts exclude editable and modal targets, unrelated modifiers, and clear selection only on traversal',async()=>{
+ render(<App/>);await openPdf();create();click('Thick');
+ for(const html of ['<input>','<textarea></textarea>','<select></select>','<div contenteditable="true"><span>x</span></div>','<div role="dialog"><button>x</button></div>','<dialog><button>x</button></dialog>']){
+ const host=document.createElement('div');host.innerHTML=html;document.body.append(host);const target=host.querySelector('span,button,input,textarea,select')!;
+ expect(historyKey('z',false,target)).toBe(true);host.remove();
+ }
+ for(const opts of [{altKey:true},{metaKey:true},{key:'y',shiftKey:true},{key:'x'}])expect(fireEvent.keyDown(window,{key:'z',ctrlKey:true,...opts})).toBe(true);
+ expect(screen.getByRole('button',{name:'Thick'}).getAttribute('aria-pressed')).toBe('true');
+ expect(historyKey()).toBe(false);expect(screen.getByRole('button',{name:'Medium'}).getAttribute('aria-pressed')).toBe('true');
+ expect(historyKey('z',true)).toBe(false);expect(screen.getByRole('button',{name:'Thick'}).getAttribute('aria-pressed')).toBe('true');
+});
+
+it.each(['highlight','edit'])('history cancels %s previews with empty and nonempty stacks; late up is harmless',async tool=>{
+ const original=await openEditable();if(tool==='highlight')click('Highlight');else selected('one');
+ const pointer=editPointer(),svg=screen.getByLabelText('Highlights for page 1');
+ let captured=false;const release=vi.fn(()=>{captured=false;});Object.assign(svg,{setPointerCapture:()=>{captured=true;},hasPointerCapture:()=>captured,releasePointerCapture:release});
+ pointer('pointerdown',80);pointer('pointermove',110,70);expect(svg.querySelector('[data-draft]')).toBeTruthy();
+ historyKey();expect(release).toHaveBeenCalledTimes(1);expect(svg.querySelector('[data-draft]')).toBeNull();pointer('pointerup',110,70);
+ click('Save Project');await idle();expect(parseProject(vi.mocked(files.writeProject).mock.calls[0][2]).session).toEqual(original.session);
+ if(tool==='highlight')click('Thick');else {selected('one');click('Selected stroke Blue');}
+ pointer('pointerdown',80);pointer('pointermove',120,90);click('Undo');historyKey('y');pointer('pointerup',120,90);
+ expect(svg.querySelector('[data-draft]')).toBeNull();expect(svg.querySelector('[data-selection-indicator]')).toBeNull();
+ click('Save Project');await idle();const saved=parseProject(vi.mocked(files.writeProject).mock.calls[1][2]);expect(saved.session.annotations).toHaveLength(3);expect(saved.session.annotations[0].points).toEqual(original.session.annotations[0].points);
+ expect(screen.getByRole('button',{name:tool==='highlight'?'Highlight':'Select/Edit',exact:true}).getAttribute('aria-pressed')).toBe('true');
+});
+it('failed/cancelled saves preserve redo and dirty close locks history until cancellation',async()=>{
+ await openEditable();selected('one');click('Selected stroke Blue');click('Undo');
+ vi.mocked(files.writeProject).mockResolvedValueOnce(null);click('Save As');await idle();
+ vi.mocked(files.writeProject).mockRejectedValueOnce(new Error('Denied'));click('Save Project');await idle();click('Redo');
+ act(()=>native.close!({preventDefault:vi.fn()}));historyKey();click('Cancel');await idle();
+ expect(screen.getByLabelText('Highlights for page 1').querySelector('[data-annotation-id="one"]')?.getAttribute('stroke')).toBe('#38bdf8');
+ historyKey();expect(status()).toContain('Saved');
+});
+
+it('undo creation clears a stale legend rename target and allows a new category',async()=>{
+ render(<App/>);await openPdf();create();click('Rename legend Walls');click('Undo');
+ expect(screen.queryByRole('button',{name:'Save name'})).toBeNull();
+ fireEvent.change(screen.getByLabelText('Legend name'),{target:{value:'Doors'}});click('Create legend');
+ expect(screen.getByLabelText('Active legend').textContent).toContain('Doors');
+ expect(screen.getByRole('button',{name:'Redo',exact:true}).hasAttribute('disabled')).toBe(true);
+});

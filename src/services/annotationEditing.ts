@@ -38,5 +38,5 @@ export function translatedHighlight(stroke: Highlight, start: Point, client: Poi
 }
 
 export function isEditingControl(target: EventTarget | null): boolean {
-  return target instanceof Element && !!target.closest('dialog, [role="dialog"], input, textarea, select, [contenteditable]:not([contenteditable="false"])');
+  return target instanceof Element && !!target.closest('dialog, [role="dialog"], [role="alertdialog"], input, textarea, select, [contenteditable]:not([contenteditable="false"])');
 }

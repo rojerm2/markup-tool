@@ -5,16 +5,18 @@ import type { Highlight } from '../../types/annotation';
 import { highlightGroups, isEditingControl, pickHighlight, translatedHighlight } from '../../services/annotationEditing';
 import type { Legend, SessionAction } from '../../services/annotationSession';
 
-type Props = { page: number; viewport: PageViewport; annotations: Highlight[]; onCommit: (stroke: Highlight) => void; style?: DrawingStyle; legendId?: string | null;
+import type { SessionHistory } from '../../services/sessionHistory';
+
+type Props = { page: number; viewport: PageViewport; annotations: Highlight[]; onCommit: (stroke: Highlight, generation?: number) => void; style?: DrawingStyle; legendId?: string | null;
   tool?: 'highlight' | 'edit'; selectedId?: string | null; onSelect?: (id: string | null) => void;
-  onAction?: (action: SessionAction) => void; legends?: Legend[]; disabled?: boolean; viewRevision?: number };
+  onAction?: (action: SessionAction, generation?: number) => void; legends?: Legend[]; disabled?: boolean; viewRevision?: number; history?: SessionHistory };
 const NO_LEGENDS: Legend[] = [];
 
 export default function AnnotationOverlay({ page, viewport, annotations, onCommit, style = DEFAULT_DRAWING, legendId = null,
-  tool = 'highlight', selectedId = null, onSelect, onAction, legends = NO_LEGENDS, disabled = false, viewRevision = 0 }: Props) {
+  tool = 'highlight', selectedId = null, onSelect, onAction, legends = NO_LEGENDS, disabled = false, viewRevision = 0, history }: Props) {
   const svg = useRef<SVGSVGElement>(null);
-  const draft = useRef<{ pointer: number; stroke: Highlight; samples: Point[] } | null>(null);
-  const move = useRef<{ pointer: number; before: Highlight; start: Point; client: Point; legends: Legend[]; preview: Highlight | null } | null>(null);
+  const draft = useRef<{ pointer: number; generation?: number; stroke: Highlight; samples: Point[] } | null>(null);
+  const move = useRef<{ pointer: number; generation?: number; before: Highlight; start: Point; client: Point; legends: Legend[]; preview: Highlight | null } | null>(null);
   const [preview, setPreview] = useState<Highlight | null>(null);
   function cancel() {
     const pointer = draft.current?.pointer ?? move.current?.pointer;
@@ -23,6 +25,7 @@ export default function AnnotationOverlay({ page, viewport, annotations, onCommi
     setPreview(null);
     if (pointer !== undefined && svg.current?.hasPointerCapture(pointer)) svg.current.releasePointerCapture(pointer);
   }
+  useEffect(() => history?.subscribeCancellation(cancel), [history]);
   useEffect(() => {
     const surface = svg.current;
     const key = (event: KeyboardEvent) => {
@@ -96,13 +99,13 @@ export default function AnnotationOverlay({ page, viewport, annotations, onCommi
         event.currentTarget.closest<HTMLElement>('.pdf-scroll')?.focus({ preventScroll: true });
         if (hit) {
           event.currentTarget.setPointerCapture(event.pointerId);
-          move.current = { pointer: event.pointerId, before: hit, start: point(event), client: { x: event.clientX, y: event.clientY }, legends, preview: null };
+          move.current = { pointer: event.pointerId, generation: history?.generation, before: hit, start: point(event), client: { x: event.clientX, y: event.clientY }, legends, preview: null };
         }
         return;
       }
       event.currentTarget.setPointerCapture(event.pointerId);
       const stroke: Highlight = { id: crypto.randomUUID(), legendId, page, type: 'freehand', points: [point(event)], ...style };
-      draft.current = { pointer: event.pointerId, stroke, samples: [...stroke.points] }; setPreview(stroke);
+      draft.current = { pointer: event.pointerId, generation: history?.generation, stroke, samples: [...stroke.points] }; setPreview(stroke);
     }}
     onPointerMove={event => { if ((draft.current?.pointer === event.pointerId || move.current?.pointer === event.pointerId) && event.buttons === 0) cancel(); else { append(event); appendMove(event); } }}
     onPointerUp={event => {
@@ -110,14 +113,14 @@ export default function AnnotationOverlay({ page, viewport, annotations, onCommi
         appendMove(event);
         const active = move.current;
         cancel();
-        if (!disabled && active.preview) onAction?.({ type: 'move-stroke', before: active.before, points: active.preview.points, legends: active.legends });
+        if (!disabled && active.preview) onAction?.({ type: 'move-stroke', before: active.before, points: active.preview.points, legends: active.legends }, active.generation);
         return;
       }
       if (draft.current?.pointer !== event.pointerId) return;
       append(event);
-      const stroke = draft.current.stroke;
+      const { stroke, generation } = draft.current;
       cancel();
-      if (!disabled && stroke.points.some(p => p.x !== stroke.points[0].x || p.y !== stroke.points[0].y)) onCommit(stroke);
+      if (!disabled && stroke.points.some(p => p.x !== stroke.points[0].x || p.y !== stroke.points[0].y)) onCommit(stroke, generation);
     }}
     onPointerCancel={cancel} onLostPointerCapture={cancel}>
     {[...groups].map(([key, strokes]) => <g key={key} opacity={strokes[0].opacity} data-highlight-layer={key}>

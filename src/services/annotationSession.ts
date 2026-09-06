@@ -30,6 +30,9 @@ export type SessionAction =
   | { type: 'move-stroke'; before: Highlight; points: Highlight['points']; legends: Legend[] }
   | { type: 'commit'; stroke: Highlight };
 
+const validColor = (color: string) => /^#[0-9a-f]{6}$/.test(color);
+const validStyle = (style: DrawingStyle) => validColor(style.color) && Number.isFinite(style.width) && style.width >= .01 && style.width <= 10000 && Number.isFinite(style.opacity) && style.opacity >= .01 && style.opacity <= 1;
+
 export function sessionReducer(state: AnnotationSession, action: SessionAction): AnnotationSession {
   switch (action.type) {
     case 'remove-stroke':
@@ -65,7 +68,7 @@ export function sessionReducer(state: AnnotationSession, action: SessionAction):
       return { ...state, annotations: state.annotations.map(s => s === action.before ? { ...s, points: action.points } : s) };
     }
     case 'create':
-      if (state.legends.some(item => item.id === action.legend.id) || legendNameError(state.legends, action.legend.name)) return state;
+      if (!action.legend.id || !validColor(action.legend.color) || state.legends.some(item => item.id === action.legend.id) || legendNameError(state.legends, action.legend.name)) return state;
       return { ...state, legends: [...state.legends, { ...action.legend, name: action.legend.name.trim() }],
         activeLegendId: action.legend.id, drawing: { ...state.drawing, color: action.legend.color } };
     case 'rename':
@@ -76,13 +79,19 @@ export function sessionReducer(state: AnnotationSession, action: SessionAction):
         activeLegendId: state.activeLegendId === action.id ? null : state.activeLegendId,
         annotations: state.annotations.map(stroke => stroke.legendId === action.id ? { ...stroke, legendId: null } : stroke) };
     case 'select': {
+      if (action.id !== null && !state.legends.some(item => item.id === action.id)) return state;
       const legend = state.legends.find(item => item.id === action.id);
       return { ...state, activeLegendId: legend?.id ?? null,
         drawing: legend ? { ...state.drawing, color: legend.color } : state.drawing };
     }
     case 'drawing':
+      if (!validStyle(action.drawing) || (!action.manual && state.activeLegendId !== null
+        && state.legends.find(l => l.id === state.activeLegendId)?.color !== action.drawing.color)) return state;
       return { ...state, drawing: action.drawing, activeLegendId: action.manual ? null : state.activeLegendId };
     case 'commit':
+      if (!action.stroke.id || state.annotations.some(s => s.id === action.stroke.id) || !validStyle(action.stroke)
+        || action.stroke.type !== 'freehand' || !Number.isInteger(action.stroke.page) || action.stroke.page < 1
+        || action.stroke.points.length < 2 || action.stroke.points.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y) || Math.abs(p.x) > 1e9 || Math.abs(p.y) > 1e9)) return state;
       // Resolve against current session state, including deletion during a gesture.
       return { ...state, annotations: [...state.annotations, { ...action.stroke,
         legendId: state.legends.some(item => item.id === action.stroke.legendId) ? action.stroke.legendId : null }] };

@@ -296,3 +296,14 @@ it('keeps Space editable in create and rename fields and reserves toolbar Space 
   fireEvent.keyUp(button, { code: 'Space' });
   expect(host.className).not.toContain('can-pan');
 });
+
+it('standalone history records one Shift/freehand stroke, restores IDs, and preserves Space pan',()=>{
+ render(<PdfNavigationView pages={[page(1)]}/>);const svg=screen.getByLabelText('Highlights for page 1');
+ Object.defineProperty(svg,'getBoundingClientRect',{value:()=>rect(0,0,600,800)});
+ const pointer=(type:string,x:number,shiftKey=false)=>fireEvent(svg,new PointerEvent(type,{bubbles:true,button:0,buttons:type==='pointerup'?0:1,clientX:x,clientY:100,shiftKey}));
+ pointer('pointerdown',40);for(let x=45;x<100;x+=5)pointer('pointermove',x,x>60);pointer('pointerup',100,true);
+ const id=svg.querySelector('[data-annotation-id]')?.getAttribute('data-annotation-id');expect(id).toBeTruthy();
+ fireEvent.keyDown(window,{key:'z',ctrlKey:true});expect(svg.querySelector('[data-annotation-id]')).toBeNull();expect(screen.getByRole('button',{name:'Undo',exact:true}).hasAttribute('disabled')).toBe(true);
+ fireEvent.click(screen.getByRole('button',{name:'Redo',exact:true}));expect(svg.querySelector('[data-annotation-id]')?.getAttribute('data-annotation-id')).toBe(id);
+ const toolbar=screen.getByRole('button',{name:'Undo',exact:true});fireEvent.keyDown(toolbar,{key:' ',code:'Space'});expect(screen.getByLabelText('PDF pages').className).toContain('can-pan');fireEvent.keyUp(window,{key:' ',code:'Space'});
+});

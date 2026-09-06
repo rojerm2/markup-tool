@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PDFPageProxy } from "pdfjs-dist";
 import { clampZoom, clientToPdf, fitScale, MAX_ZOOM, MIN_ZOOM, pdfToClient, type Point, type ZoomMode } from "../../services/coordinates";
 import PdfPage from "./PdfPage";
@@ -9,14 +9,28 @@ import DrawingControls from "../Annotations/DrawingControls";
 import LegendControls from "../Annotations/LegendControls";
 import EditingControls from "../Annotations/EditingControls";
 import { isEditingControl } from '../../services/annotationEditing';
-import { emptySession, sessionReducer, type AnnotationSession, type SessionAction } from "../../services/annotationSession";
+import { emptySession, type AnnotationSession, type SessionAction } from "../../services/annotationSession";
+
+import { SessionHistory } from "../../services/sessionHistory";
 
 const GUTTER = 32;
 const LABEL_HEIGHT = 28;
 
-export default function PdfNavigationView({ pages, session: controlled, onAction, disabled = false }: { pages: PDFPageProxy[]; session?: AnnotationSession; onAction?: (action: SessionAction) => void; disabled?: boolean }) {
-  const [local, localDispatch] = useReducer(sessionReducer, emptySession);
-  const session = controlled ?? local, dispatch = onAction ?? localDispatch;
+export default function PdfNavigationView({ pages, session: controlled, onAction, history: suppliedHistory, onHistory, disabled = false }: { pages: PDFPageProxy[]; session?: AnnotationSession; onAction?: (action: SessionAction, generation?: number) => void; history?: SessionHistory; onHistory?: (direction: 'undo' | 'redo') => boolean; disabled?: boolean }) {
+  const [local] = useState(() => new SessionHistory(controlled ?? emptySession));
+  const [, refresh] = useState(0);
+  const history = suppliedHistory ?? local;
+  const session = controlled ?? history.present;
+  const dispatch = (action: SessionAction, generation?: number) => {
+    if (disabled) return;
+    if (onAction) onAction(action, generation);
+    else if (history.apply(action, generation)) refresh(v => v + 1);
+  };
+  function traverse(direction: 'undo' | 'redo') {
+    if (disabled) return;
+    const changed = onHistory ? onHistory(direction) : history.traverse(direction);
+    if (changed) { setSelectedId(null); refresh(v => v + 1); }
+  }
   const { drawing, annotations, activeLegendId } = session;
   const [tool, setTool] = useState<'highlight' | 'edit'>('highlight');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -25,7 +39,13 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
   useEffect(() => { if (selectedId && !annotations.some(s => s.id === selectedId)) setSelectedId(null); }, [annotations, selectedId]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (disabled || tool !== 'edit') return;
+      if (disabled) return;
+      const key = event.key.toLowerCase();
+      if (!isEditingControl(event.target) && event.ctrlKey && !event.metaKey && !event.altKey
+        && ((key === 'z') || (key === 'y' && !event.shiftKey))) {
+        event.preventDefault(); traverse(key === 'y' || event.shiftKey ? 'redo' : 'undo'); return;
+      }
+      if (tool !== 'edit') return;
       if (event.key === 'Escape' && !(event.target instanceof Element && event.target.closest('dialog, [role="dialog"]'))) setSelectedId(null);
       if (isEditingControl(event.target)) return;
       if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId
@@ -194,6 +214,10 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
 
     </div>
     <div className="annotation-tools">
+      <div className="tool-modes" role="group" aria-label="History">
+        <button disabled={disabled || !history.undoLabel} title={`Undo ${history.undoLabel ?? ''} (Ctrl+Z)`} aria-keyshortcuts="Control+z" onClick={() => traverse('undo')}>Undo</button>
+        <button disabled={disabled || !history.redoLabel} title={`Redo ${history.redoLabel ?? ''} (Ctrl+Y / Ctrl+Shift+Z)`} aria-keyshortcuts="Control+y Control+Shift+z" onClick={() => traverse('redo')}>Redo</button>
+      </div>
       <div className="tool-modes" role="group" aria-label="Annotation mode">
         <button aria-pressed={tool === 'highlight'} onClick={() => { setTool('highlight'); setSelectedId(null); }}>Highlight</button>
         <button aria-pressed={tool === 'edit'} onClick={() => setTool('edit')}>Select/Edit</button>
@@ -213,9 +237,9 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
           return <div key={page.pageNumber} data-page={page.pageNumber} style={{ width: viewport.width, minHeight: viewport.height + LABEL_HEIGHT }}>
             <PdfPage page={page} scale={scales[index]}>
               <AnnotationOverlay page={page.pageNumber} viewport={viewport} style={drawing} legendId={activeLegendId}
-                tool={tool} selectedId={selectedId} onSelect={setSelectedId} onAction={dispatch} legends={session.legends} disabled={disabled} viewRevision={viewRevision}
+                history={history} tool={tool} selectedId={selectedId} onSelect={setSelectedId} onAction={dispatch} legends={session.legends} disabled={disabled} viewRevision={viewRevision}
                 annotations={annotations.filter(stroke => stroke.page === page.pageNumber)}
-                onCommit={stroke => dispatch({ type: 'commit', stroke })} />
+                onCommit={(stroke, generation) => dispatch({ type: 'commit', stroke }, generation)} />
             </PdfPage>
           </div>;
         })}

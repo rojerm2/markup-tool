@@ -3,13 +3,14 @@ import { useEffect, useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import PdfNavigationView from './components/PdfViewer/PdfNavigationView';
-import { emptySession, sessionReducer, type AnnotationSession, type SessionAction } from './services/annotationSession';
+import { emptySession, type AnnotationSession, type SessionAction } from './services/annotationSession';
 import { sameSource, serializeProject, type SourceIdentity } from './services/projectFormat';
 import { choosePdf, loadSource, readProject, resolveSource, writeProject } from './services/projectService';
+import { SessionHistory } from './services/sessionHistory';
 import type { PDFPageProxy } from 'pdfjs-dist';
 
 type Work = { id: number; sourcePath: string; projectPath: string | null; source: SourceIdentity;
-  pages: PDFPageProxy[]; session: AnnotationSession; saved: string; controller: AbortController };
+  pages: PDFPageProxy[]; history: SessionHistory; session: AnnotationSession; saved: string; controller: AbortController };
 type Choice = 'save' | 'discard' | 'cancel';
 function DirtyDialog({ answer }: { answer: (choice: Choice) => void }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -33,10 +34,17 @@ export default function App() {
   const pending = useRef<((choice: Choice) => void) | null>(null);
   const dirty = (value: Work | null) => !!value && JSON.stringify(value.session) !== value.saved;
   function publish(value: Work) { live.current = value; setWork(value); }
-  function mutate(action: SessionAction) {
+  function mutate(action: SessionAction, generation: number | undefined, workId: number) {
     const current = live.current;
-    if (!current || replacing.current) return;
-    publish({ ...current, session: sessionReducer(current.session, action) });
+    if (!current || current.id !== workId || replacing.current) return;
+    if (current.history.apply(action, generation)) publish({ ...current, session: current.history.present });
+  }
+  function traverse(direction: 'undo' | 'redo') {
+    const current = live.current;
+    if (!current || replacing.current) return false;
+    const changed = current.history.traverse(direction);
+    if (changed) publish({ ...current, session: current.history.present });
+    return changed;
   }
   function answer(choice: Choice) { setQuestion(false); pending.current?.(choice); pending.current = null; }
   async function saveCurrent(as = false): Promise<boolean> {
@@ -58,7 +66,9 @@ export default function App() {
   }
   async function run(kind: 'opening' | 'saving' | 'closing', task: () => Promise<void>) {
     if (locked.current) return;
-    locked.current = true; replacing.current = kind !== 'saving'; setOperation(kind); setError(null); setNotice(null);
+    locked.current = true; replacing.current = kind !== 'saving';
+    if (replacing.current) live.current?.history.invalidate();
+    setOperation(kind); setError(null); setNotice(null);
     try { await task(); }
     catch (err) { if (alive.current) setError(`${err instanceof Error ? err.message : String(err)} Please retry or choose another file.`); }
     finally { locked.current = false; replacing.current = false; if (alive.current) { setOperation(null); setNotice(null); } }
@@ -82,7 +92,7 @@ export default function App() {
         const session = selected?.project.session ?? structuredClone(emptySession);
         const previous = live.current;
         publish({ id: ++counter.current, sourcePath: path, projectPath: selected?.path ?? null,
-          ...loaded, session, saved: JSON.stringify(session), controller });
+          ...loaded, session, history: new SessionHistory(session), saved: JSON.stringify(session), controller });
         staging.current = null;
         previous?.controller.abort();
       } finally { if (staging.current === controller) { controller.abort(); staging.current = null; } }
@@ -115,7 +125,7 @@ export default function App() {
     {error && <p role="alert" className="project-error">{error}</p>}
     {notice && <p role="status" className="project-error">{notice}</p>}
     <div className="project-workspace" inert={operation === 'opening' || operation === 'closing'}>
-      {work ? <PdfNavigationView key={work.id} pages={work.pages} session={work.session} onAction={mutate} disabled={operation === 'opening' || operation === 'closing'} /> : <p className="empty-document">No PDF selected.</p>}
+      {work ? <PdfNavigationView key={work.id} pages={work.pages} session={work.session} history={work.history} onHistory={traverse} onAction={(action, generation) => mutate(action, generation, work.id)} disabled={operation === 'opening' || operation === 'closing'} /> : <p className="empty-document">No PDF selected.</p>}
     </div>
     {question && <DirtyDialog answer={answer} />}
   </main>;
