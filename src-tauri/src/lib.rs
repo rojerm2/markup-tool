@@ -15,7 +15,10 @@ pub fn run() {
             greet,
             persistence::read_project,
             persistence::resolve_source,
-            persistence::write_project
+            persistence::write_project,
+            persistence::read_export_source,
+            persistence::read_source_pdf,
+            persistence::write_export
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

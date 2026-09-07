@@ -2,6 +2,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { PDFPageProxy } from 'pdfjs-dist';
 import App from '../src/App';
+import * as exports from '../src/services/exportService';
+vi.mock('../src/services/exportService', () => ({ exportPdf: vi.fn() }));
 import * as files from '../src/services/projectService';
 import { emptySession } from '../src/services/annotationSession';
 import { parseProject } from '../src/services/projectFormat';
@@ -271,4 +273,31 @@ it('undo creation clears a stale legend rename target and allows a new category'
  fireEvent.change(screen.getByLabelText('Legend name'),{target:{value:'Doors'}});click('Create legend');
  expect(screen.getByLabelText('Active legend').textContent).toContain('Doors');
  expect(screen.getByRole('button',{name:'Redo',exact:true}).hasAttribute('disabled')).toBe(true);
+});
+
+it('export snapshots committed state while edits/history continue and locks other file operations', async () => {
+  render(<App />); await openPdf(); create(); click('Save Project'); await idle(); click('Thick');
+  const pendingExport = deferred<string|null>(); vi.mocked(exports.exportPdf).mockReturnValueOnce(pendingExport.promise);
+  click('Export Annotated PDF');
+  const args = vi.mocked(exports.exportPdf).mock.calls[0];
+  expect(args[1]).toContain('one.pmarkup'); expect(args[3].drawing.width).toBe(20);
+  click('Undo'); click('Thin'); click('Redo');
+  expect(screen.getByRole('button',{name:'Open PDF'}).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('button',{name:'Save Project'}).hasAttribute('disabled')).toBe(true);
+  act(() => native.close!({preventDefault:vi.fn()})); expect(native.destroy).not.toHaveBeenCalled();
+  expect(args[3].drawing.width).toBe(20);
+  await act(async () => pendingExport.resolve('C:/marked.pdf')); await idle();
+  expect(status()).toContain('Exported marked.pdf'); expect(status()).toContain('one.pmarkup'); expect(status()).toContain('Unsaved changes');
+  expect(screen.getByRole('button',{name:'Undo'}).hasAttribute('disabled')).toBe(false);
+  click('Undo'); expect(status()).not.toContain('Unsaved changes');
+});
+it('cancelled/failed exports preserve dirty baseline and unmount aborts a pending export', async () => {
+  const view = render(<App />); await openPdf(); click('Thick');
+  vi.mocked(exports.exportPdf).mockResolvedValueOnce(null); click('Export Annotated PDF'); await idle();
+  expect(screen.queryByRole('alert')).toBeNull(); expect(status()).toContain('Unsaved changes');
+  vi.mocked(exports.exportPdf).mockRejectedValueOnce(new Error('Source PDF changed'));
+  click('Export Annotated PDF'); await idle(); expect(screen.getByRole('alert').textContent).toContain('Source PDF changed');
+  const pendingExport = deferred<string|null>(); vi.mocked(exports.exportPdf).mockReturnValueOnce(pendingExport.promise);
+  click('Export Annotated PDF'); const signal = vi.mocked(exports.exportPdf).mock.calls[2][4]; view.unmount(); expect(signal.aborted).toBe(true);
+  await act(async () => pendingExport.resolve('C:/late.pdf'));
 });

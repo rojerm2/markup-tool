@@ -6,6 +6,7 @@ import PdfNavigationView from './components/PdfViewer/PdfNavigationView';
 import { emptySession, type AnnotationSession, type SessionAction } from './services/annotationSession';
 import { sameSource, serializeProject, type SourceIdentity } from './services/projectFormat';
 import { choosePdf, loadSource, readProject, resolveSource, writeProject } from './services/projectService';
+import { exportPdf } from './services/exportService';
 import { SessionHistory } from './services/sessionHistory';
 import type { PDFPageProxy } from 'pdfjs-dist';
 
@@ -28,7 +29,7 @@ export default function App() {
   const live = useRef<Work | null>(null), counter = useRef(0), locked = useRef(false), alive = useRef(true);
   const staging = useRef<AbortController | null>(null);
   const replacing = useRef(false);
-  const [operation, setOperation] = useState<'opening' | 'saving' | 'closing' | null>(null);
+  const [operation, setOperation] = useState<'opening' | 'saving' | 'exporting' | 'closing' | null>(null);
   const [error, setError] = useState<string | null>(null), [notice, setNotice] = useState<string | null>(null);
   const [question, setQuestion] = useState(false);
   const pending = useRef<((choice: Choice) => void) | null>(null);
@@ -64,14 +65,25 @@ export default function App() {
     if (choice === 'cancel') return false;
     return choice === 'discard' || await saveCurrent();
   }
-  async function run(kind: 'opening' | 'saving' | 'closing', task: () => Promise<void>) {
+  async function run(kind: 'opening' | 'saving' | 'exporting' | 'closing', task: () => Promise<void>) {
     if (locked.current) return;
-    locked.current = true; replacing.current = kind !== 'saving';
+    locked.current = true; replacing.current = kind === 'opening' || kind === 'closing';
     if (replacing.current) live.current?.history.invalidate();
     setOperation(kind); setError(null); setNotice(null);
     try { await task(); }
     catch (err) { if (alive.current) setError(`${err instanceof Error ? err.message : String(err)} Please retry or choose another file.`); }
-    finally { locked.current = false; replacing.current = false; if (alive.current) { setOperation(null); setNotice(null); } }
+    finally { locked.current = false; replacing.current = false; if (alive.current) { setOperation(null); } }
+  }
+  async function exportCurrent() {
+    await run('exporting', async () => {
+      const snapshot = live.current;
+      if (!snapshot) return;
+      snapshot.history.invalidate();
+      const path = await exportPdf(snapshot.sourcePath, snapshot.projectPath, snapshot.source,
+        snapshot.session, snapshot.controller.signal);
+      if (path && alive.current && live.current?.id === snapshot.id)
+        setNotice(`Exported ${path.split(/[\\/]/).pop()}. Editable project unchanged.`);
+    });
   }
   async function openWork(projectMode: boolean) {
     await run('opening', async () => {
@@ -120,10 +132,11 @@ export default function App() {
         <button disabled={!!operation} onClick={() => void openWork(true)}>Open Project</button>
         <button disabled={!work || !!operation} onClick={() => void run('saving', async () => { await saveCurrent(); })}>Save Project</button>
         <button disabled={!work || !!operation} onClick={() => void run('saving', async () => { await saveCurrent(true); })}>Save As</button>
+        <button disabled={!work || !!operation} onClick={() => void exportCurrent()}>Export Annotated PDF</button>
       </div></header>
-    <p className="document-name" role="status">{work ? `${work.projectPath?.split(/[\\/]/).pop() ?? 'Unsaved project'} · PDF: ${work.source.filename} · ${dirty(work) ? 'Unsaved changes' : work.projectPath ? 'Saved' : 'Ready to save'}` : 'Open a PDF or an editable project.'}{operation && ` · ${operation === 'saving' ? 'Saving…' : operation === 'opening' ? 'Opening…' : 'Closing…'}`}</p>
+    <p className="document-name" role="status">{work ? `${work.projectPath?.split(/[\\/]/).pop() ?? 'Unsaved project'} · PDF: ${work.source.filename} · ${dirty(work) ? 'Unsaved changes' : work.projectPath ? 'Saved' : 'Ready to save'}` : 'Open a PDF or an editable project.'}{operation && ` · ${operation === 'exporting' ? 'Exporting�' : operation === 'saving' ? 'Saving…' : operation === 'opening' ? 'Opening…' : 'Closing…'}`}{!operation && notice && ` | ${notice}`}</p>
     {error && <p role="alert" className="project-error">{error}</p>}
-    {notice && <p role="status" className="project-error">{notice}</p>}
+    {operation && notice && <p role="status" className="document-name">{notice}</p>}
     <div className="project-workspace" inert={operation === 'opening' || operation === 'closing'}>
       {work ? <PdfNavigationView key={work.id} pages={work.pages} session={work.session} history={work.history} onHistory={traverse} onAction={(action, generation) => mutate(action, generation, work.id)} disabled={operation === 'opening' || operation === 'closing'} /> : <p className="empty-document">No PDF selected.</p>}
     </div>

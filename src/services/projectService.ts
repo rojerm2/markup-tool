@@ -1,6 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
-import { readFile } from '@tauri-apps/plugin-fs';
 import { loadDocument } from './pdfService';
 import { hashBytes, MAX_PROJECT_BYTES, parseProject, type SourceIdentity } from './projectFormat';
 
@@ -16,15 +15,20 @@ export async function readProject() {
   return { path, project: parseProject(text) };
 }
 export async function loadSource(path: string, signal: AbortSignal) {
-  const bytes = await readFile(path);
+  const bytes = new Uint8Array(await invoke<ArrayBuffer>('read_source_pdf', { path }));
   signal.throwIfAborted();
   const size = bytes.length;
-  if (!size || size > 1024 * 1024 * 1024) throw new Error('PDF must be between 1 byte and 1 GiB.');
+  if (!size || size > 256 * 1024 * 1024) throw new Error('PDF must be between 1 byte and 256 MiB.');
   const sha256 = await hashBytes(bytes);
   signal.throwIfAborted();
   const pdf = await loadDocument(path, signal, bytes);
   if (pdf.numPages > 10000) throw new Error('PDF exceeds 10,000 pages.');
-  const pages = await Promise.all(Array.from({ length: pdf.numPages }, (_, i) => pdf.getPage(i + 1)));
+  // Fetch metadata in small batches; do not fan out 10,000 page requests at once.
+  const pages = [];
+  for (let start = 0; start < pdf.numPages; start += 16) {
+    signal.throwIfAborted();
+    pages.push(...await Promise.all(Array.from({ length: Math.min(16, pdf.numPages - start) }, (_, i) => pdf.getPage(start + i + 1))));
+  }
   signal.throwIfAborted();
   const source: SourceIdentity = { reference: path, filename: path.split(/[\\/]/).pop()!, size, sha256, pages: pdf.numPages };
   return { pages, source };

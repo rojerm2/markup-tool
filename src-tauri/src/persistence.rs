@@ -159,10 +159,268 @@ fn save_file(path: &Path, source: &Path, text: &str) -> Result<(), String> {
     })
 }
 
+// Export uses the same transactional sibling writer as editable projects.
+const MAX_PDF_BYTES: u64 = 256 * 1024 * 1024;
+fn read_pdf_file(path: &Path) -> Result<Vec<u8>, String> {
+    let file = File::open(path).map_err(|e| e.to_string())?;
+    let size = file.metadata().map_err(|e| e.to_string())?.len();
+    if size == 0 || size > MAX_PDF_BYTES { return Err("PDF must be between 1 byte and 256 MiB".into()); }
+    let mut bytes = Vec::new();
+    file.take(MAX_PDF_BYTES + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > MAX_PDF_BYTES { return Err("PDF exceeds 256 MiB".into()); }
+    Ok(bytes)
+}
+#[tauri::command]
+pub async fn read_source_pdf(app: tauri::AppHandle, path: PathBuf) -> Result<tauri::ipc::Response, String> {
+    allowed(&app, &path)?;
+    tauri::async_runtime::spawn_blocking(move || read_pdf_file(&path).map(tauri::ipc::Response::new))
+        .await.map_err(|e| e.to_string())?
+}
+fn verified_source(source: &Path, size: u64, sha256: &str) -> Result<Vec<u8>, String> {
+    use sha2::{Digest, Sha256};
+    if size == 0 || size > MAX_PDF_BYTES {
+        return Err("Export supports source PDFs up to 256 MiB".into());
+    }
+    let file = File::open(source).map_err(|e| format!("Cannot read source PDF: {e}"))?;
+    if file.metadata().map_err(|e| e.to_string())?.len() != size {
+        return Err("Source PDF changed since opening".into());
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_PDF_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() as u64 != size || format!("{:x}", Sha256::digest(&bytes)) != sha256 {
+        return Err("Source PDF changed since opening (SHA-256 mismatch)".into());
+    }
+    Ok(bytes)
+}
+#[tauri::command]
+pub async fn read_export_source(
+    app: tauri::AppHandle,
+    source_path: PathBuf,
+    size: u64,
+    sha256: String,
+) -> Result<tauri::ipc::Response, String> {
+    allowed(&app, &source_path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        verified_source(&source_path, size, &sha256).map(tauri::ipc::Response::new)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+fn export_destination(
+    path: &Path,
+    source: &Path,
+    project: Option<&Path>,
+) -> Result<PathBuf, String> {
+    if !path.is_absolute()
+        || path
+            .extension()
+            .and_then(|x| x.to_str())
+            .map(|x| x.eq_ignore_ascii_case("pdf"))
+            != Some(true)
+        || path
+            .file_name()
+            .and_then(|x| x.to_str())
+            .is_none_or(|x| x.contains(':'))
+    {
+        return Err("Choose an absolute destination with the .pdf extension".into());
+    }
+    let target = path
+        .parent()
+        .ok_or("Missing parent")?
+        .canonicalize()
+        .map_err(|e| e.to_string())?
+        .join(path.file_name().ok_or("Missing filename")?);
+    for protected in std::iter::once(source).chain(project) {
+        let canonical = protected.canonicalize().map_err(|e| e.to_string())?;
+        if target
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&canonical.to_string_lossy())
+            || (target.exists()
+                && same_file::is_same_file(&target, &canonical).map_err(|e| e.to_string())?)
+        {
+            return Err("Cannot overwrite the source PDF or current editable project".into());
+        }
+    }
+    if target.exists() && !target.is_file() {
+        return Err("Destination is not a regular file".into());
+    }
+    Ok(target)
+}
+fn export_file(
+    path: &Path,
+    source: &Path,
+    project: Option<&Path>,
+    size: u64,
+    sha256: &str,
+    bytes: &[u8],
+) -> Result<(), String> {
+    if bytes.len() as u64 > MAX_PDF_BYTES || !bytes.starts_with(b"%PDF-") {
+        return Err("Invalid or oversized export (256 MiB limit)".into());
+    }
+    let target = export_destination(path, source, project)?;
+    verified_source(source, size, sha256)?;
+    atomic_write(&target, bytes, || {
+        export_destination(&target, source, project)?;
+        verified_source(source, size, sha256).map(|_| ())
+    })
+}
+#[tauri::command]
+pub async fn write_export(
+    app: tauri::AppHandle,
+    path: PathBuf,
+    source_path: PathBuf,
+    project_path: Option<PathBuf>,
+    size: u64,
+    sha256: String,
+    bytes: Vec<u8>,
+) -> Result<(), String> {
+    allowed(&app, &path)?;
+    allowed(&app, &source_path)?;
+    if let Some(project) = &project_path {
+        allowed(&app, project)?;
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        export_file(
+            &path,
+            &source_path,
+            project_path.as_deref(),
+            size,
+            &sha256,
+            &bytes,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+    #[test]
+    fn bounded_pdf_read_rejects_empty_and_oversized_before_allocation() {
+        let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("large.pdf");
+        let file = File::create(&path).unwrap();
+        assert!(read_pdf_file(&path).is_err());
+        file.set_len(MAX_PDF_BYTES + 1).unwrap();
+        assert!(read_pdf_file(&path).is_err());
+        drop(file); fs::write(&path, b"%PDF-small").unwrap();
+        assert_eq!(read_pdf_file(&path).unwrap(), b"%PDF-small");
+    }
+    fn identity(bytes: &[u8]) -> (u64, String) {
+        use sha2::{Digest, Sha256};
+        (bytes.len() as u64, format!("{:x}", Sha256::digest(bytes)))
+    }
+    #[test]
+    fn export_creates_replaces_and_checks_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.pdf");
+        let target = dir.path().join("marked.pdf");
+        let original = b"%PDF-original";
+        fs::write(&source, original).unwrap();
+        let (size, hash) = identity(original);
+        export_file(&target, &source, None, size, &hash, b"%PDF-first").unwrap();
+        export_file(&target, &source, None, size, &hash, b"%PDF-second").unwrap();
+        assert_eq!(fs::read(&source).unwrap(), original);
+        assert_eq!(verified_source(&source, size, &hash).unwrap(), original);
+        fs::write(&source, b"%PDF-modified").unwrap();
+        assert!(export_file(&target, &source, None, size, &hash, b"%PDF-third").is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"%PDF-second");
+        fs::remove_file(&source).unwrap();
+        assert!(export_file(&target, &source, None, size, &hash, b"%PDF-third").is_err());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+    #[test]
+    fn export_rejects_protected_aliases_and_invalid_destinations() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.pdf");
+        let project = dir.path().join("work.pmarkup");
+        fs::write(&source, b"%PDF-original").unwrap();
+        fs::write(&project, b"project").unwrap();
+        let (size, hash) = identity(b"%PDF-original");
+        let alias = dir.path().join("alias.pdf");
+        fs::hard_link(&source, &alias).unwrap();
+        let project_alias = dir.path().join("project.pdf");
+        fs::hard_link(&project, &project_alias).unwrap();
+        for name in [
+            "source.pdf",
+            "SOURCE.PDF",
+            "alias.pdf",
+            "project.pdf",
+            "work.pmarkup",
+            "bad.pdf.",
+            "bad.pdf ",
+            "bad.pdf:stream",
+            "bad.txt",
+        ] {
+            assert!(
+                export_file(
+                    &dir.path().join(name),
+                    &source,
+                    Some(&project),
+                    size,
+                    &hash,
+                    b"%PDF-new"
+                )
+                .is_err(),
+                "{name}"
+            );
+        }
+        assert!(export_file(
+            &dir.path()
+                .join("../")
+                .join(dir.path().file_name().unwrap())
+                .join("source.pdf"),
+            &source,
+            None,
+            size,
+            &hash,
+            b"%PDF-new"
+        )
+        .is_err());
+        assert!(export_file(
+            Path::new("relative.pdf"),
+            &source,
+            None,
+            size,
+            &hash,
+            b"%PDF-new"
+        )
+        .is_err());
+        assert!(export_file(
+            &dir.path().join("new.pdf"),
+            &source,
+            None,
+            size,
+            &hash,
+            b"invalid"
+        )
+        .is_err());
+        assert_eq!(fs::read(source).unwrap(), b"%PDF-original");
+        assert_eq!(fs::read(project).unwrap(), b"project");
+    }
+    #[cfg(windows)]
+    #[test]
+    fn export_sharing_failure_preserves_output_and_cleans_sibling() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.pdf");
+        let target = dir.path().join("output.pdf");
+        fs::write(&source, b"%PDF-original").unwrap();
+        fs::write(&target, b"%PDF-last").unwrap();
+        let (size, hash) = identity(b"%PDF-original");
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&target)
+            .unwrap();
+        assert!(export_file(&target, &source, None, size, &hash, b"%PDF-new").is_err());
+        drop(lock);
+        assert_eq!(fs::read(target).unwrap(), b"%PDF-last");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
     fn project() -> &'static str {
         r#"{"format":"pdf-markup-project","version":1,"source":{}}"#
     }

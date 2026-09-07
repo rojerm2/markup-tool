@@ -307,3 +307,17 @@ it('standalone history records one Shift/freehand stroke, restores IDs, and pres
  fireEvent.click(screen.getByRole('button',{name:'Redo',exact:true}));expect(svg.querySelector('[data-annotation-id]')?.getAttribute('data-annotation-id')).toBe(id);
  const toolbar=screen.getByRole('button',{name:'Undo',exact:true});fireEvent.keyDown(toolbar,{key:' ',code:'Space'});expect(screen.getByLabelText('PDF pages').className).toContain('can-pan');fireEvent.keyUp(window,{key:' ',code:'Space'});
 });
+
+it('bounds raster resources while navigating many pages and retains offscreen layout', () => {
+  const pages=Array.from({length:100},(_,i)=>page(i+1));
+  const view=render(<PdfNavigationView pages={pages} />);
+  expect(view.container.querySelectorAll('[data-page]')).toHaveLength(100);
+  expect(view.container.querySelectorAll('canvas').length).toBeLessThanOrEqual(8);
+  const first=screen.getByLabelText('PDF page 1') as HTMLCanvasElement;
+  const input=screen.getByLabelText('Page number');fireEvent.change(input,{target:{value:'100'}});fireEvent.submit(input.closest('form')!);
+  expect(screen.getByLabelText('PDF page 100')).toBeTruthy();expect(screen.queryByLabelText('PDF page 1')).toBeNull();expect(first.width).toBe(0);expect(first.height).toBe(0);
+  expect(view.container.querySelector('[data-page="1"] .page-surface')?.getAttribute('style')).toContain('height:');
+  expect(view.container.querySelectorAll('canvas').length).toBeLessThanOrEqual(8);
+  fireEvent.change(input,{target:{value:'1'}});fireEvent.submit(input.closest('form')!);expect(screen.getByLabelText('PDF page 1')).not.toBe(first);
+  const finalCanvas=screen.getByLabelText('PDF page 1') as HTMLCanvasElement;view.unmount();expect(finalCanvas.width).toBe(0);
+});

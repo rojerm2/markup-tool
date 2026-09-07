@@ -73,13 +73,30 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
     page.getViewport({ scale: 1 }),
     { width: size.width - GUTTER, height: size.height - GUTTER - LABEL_HEIGHT }, mode,
   ));
+  const [rasterPages, setRasterPages] = useState<number[]>(() => pages.slice(0, 3).map(p => p.pageNumber));
+  function updateRasterPages() {
+    const element = host.current;
+    if (!element || !element.clientHeight || pages.length <= 3) return;
+    const bounds = element.getBoundingClientRect(), overscan = element.clientHeight / 2;
+    const nearby = Array.from(element.querySelectorAll<HTMLElement>('[data-page]')).map(node => {
+      const rect = node.getBoundingClientRect();
+      return { page: Number(node.dataset.page), top: rect.top, bottom: rect.bottom,
+        distance: Math.abs((rect.top + rect.bottom) / 2 - (bounds.top + bounds.bottom) / 2) };
+    }).filter(p => p.bottom >= bounds.top - overscan && p.top <= bounds.bottom + overscan)
+      .sort((a, b) => a.distance - b.distance).slice(0, 8).map(p => p.page).sort((a,b) => a-b);
+    if (!nearby.length) return;
+    setRasterPages(previous => previous.join(',') === nearby.join(',') ? previous : nearby);
+  }
+  useLayoutEffect(updateRasterPages, [mode, zoom, size, current, pages]);
   const activeScale = scales[current - 1];
 
   function pageCanvas(number: number) {
-    return host.current?.querySelector<HTMLCanvasElement>(`[data-page="${number}"] canvas`);
+    return host.current?.querySelector<HTMLElement>(`[data-page="${number}"] canvas`)
+      ?? host.current?.querySelector<HTMLElement>(`[data-page="${number}"] .page-surface`);
   }
 
   function updateCurrent() {
+    updateRasterPages();
     const element = host.current;
     if (!element) return;
     const bounds = element.getBoundingClientRect();
@@ -235,7 +252,8 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
         {pages.map((page, index) => {
           const viewport = page.getViewport({ scale: scales[index] });
           return <div key={page.pageNumber} data-page={page.pageNumber} style={{ width: viewport.width, minHeight: viewport.height + LABEL_HEIGHT }}>
-            <PdfPage page={page} scale={scales[index]}>
+            <PdfPage page={page} scale={scales[index]} active={rasterPages.includes(page.pageNumber)}
+              pixelBudget={Math.min(16_000_000, 32_000_000 / Math.max(1, rasterPages.length))}>
               <AnnotationOverlay page={page.pageNumber} viewport={viewport} style={drawing} legendId={activeLegendId}
                 history={history} tool={tool} selectedId={selectedId} onSelect={setSelectedId} onAction={dispatch} legends={session.legends} disabled={disabled} viewRevision={viewRevision}
                 annotations={annotations.filter(stroke => stroke.page === page.pageNumber)}
