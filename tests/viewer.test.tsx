@@ -119,3 +119,9 @@ it('resets legends, active selection and vectors on document replacement while p
   expect(screen.getByRole('button', { name: 'Legends (0)' })).toBeTruthy();
   expect(screen.getByLabelText('Highlights for page 1').querySelector('polyline')).toBeNull();
 });
+it('synchronous raster failure remains an inline error and releases the canvas', () => {
+  vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockReturnValue({} as CanvasRenderingContext2D);
+  const broken=page();vi.mocked(broken.render).mockImplementation(()=>{throw new Error('Raster allocation failed');});
+  const view=render(<PdfPage page={broken}/>);expect(screen.getByRole('alert').textContent).toContain('Raster allocation failed');
+  const canvas=screen.getByLabelText('PDF page 1') as HTMLCanvasElement;view.unmount();expect(canvas.width).toBe(0);
+});

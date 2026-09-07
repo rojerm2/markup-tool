@@ -72,7 +72,7 @@ export default function App() {
     setOperation(kind); setError(null); setNotice(null);
     try { await task(); }
     catch (err) { if (alive.current) setError(`${err instanceof Error ? err.message : String(err)} Please retry or choose another file.`); }
-    finally { locked.current = false; replacing.current = false; if (alive.current) { setOperation(null); } }
+    finally { locked.current = false; replacing.current = false; if (alive.current) { setOperation(null); if (kind !== 'exporting') setNotice(null); } }
   }
   async function exportCurrent() {
     await run('exporting', async () => {
@@ -134,7 +134,7 @@ export default function App() {
         <button disabled={!work || !!operation} onClick={() => void run('saving', async () => { await saveCurrent(true); })}>Save As</button>
         <button disabled={!work || !!operation} onClick={() => void exportCurrent()}>Export Annotated PDF</button>
       </div></header>
-    <p className="document-name" role="status">{work ? `${work.projectPath?.split(/[\\/]/).pop() ?? 'Unsaved project'} · PDF: ${work.source.filename} · ${dirty(work) ? 'Unsaved changes' : work.projectPath ? 'Saved' : 'Ready to save'}` : 'Open a PDF or an editable project.'}{operation && ` · ${operation === 'exporting' ? 'Exporting�' : operation === 'saving' ? 'Saving…' : operation === 'opening' ? 'Opening…' : 'Closing…'}`}{!operation && notice && ` | ${notice}`}</p>
+    <p className="document-name" role="status">{work ? `${work.projectPath?.split(/[\\/]/).pop() ?? 'Unsaved project'} · PDF: ${work.source.filename} · ${dirty(work) ? 'Unsaved changes' : work.projectPath ? 'Saved' : 'Ready to save'}` : 'Open a PDF or an editable project.'}{operation && ` · ${operation === 'exporting' ? 'Exporting...' : operation === 'saving' ? 'Saving…' : operation === 'opening' ? 'Opening…' : 'Closing…'}`}{!operation && notice && ` | ${notice}`}</p>
     {error && <p role="alert" className="project-error">{error}</p>}
     {operation && notice && <p role="status" className="document-name">{notice}</p>}
     <div className="project-workspace" inert={operation === 'opening' || operation === 'closing'}>

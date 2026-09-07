@@ -30,11 +30,17 @@ export default function PdfPage({ page, scale = 1.25, children, active = true, p
     const context = canvas.getContext("2d");
     if (!context) {
       setError("Canvas rendering is unavailable.");
-      return () => canvas.remove();
+      return () => { canvas.remove(); canvas.width = 0; canvas.height = 0; };
     }
     let cancelled = false;
-    const task = page.render({ canvas, canvasContext: context, viewport,
-      transform: [ratio, 0, 0, ratio, 0, 0] });
+    let task: ReturnType<PDFPageProxy['render']>;
+    try {
+      task = page.render({ canvas, canvasContext: context, viewport,
+        transform: [ratio, 0, 0, ratio, 0, 0] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return () => { canvas.remove(); canvas.width = 0; canvas.height = 0; };
+    }
     void task.promise.catch((err: unknown) => {
       if (!cancelled) setError(err instanceof Error ? err.message : String(err));
     });
@@ -43,7 +49,7 @@ export default function PdfPage({ page, scale = 1.25, children, active = true, p
       task.cancel();
       canvas.remove();
       canvas.width = 0; canvas.height = 0;
-      void task.promise.catch(() => {}).then(() => page.cleanup?.());
+      void task.promise.catch(() => {}).then(() => page.cleanup?.()).catch(error => console.error("PDF page cleanup failed", error));
     };
   }, [page, scale, active, pixelBudget]);
   const viewport = page.getViewport({ scale });

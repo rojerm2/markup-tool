@@ -164,17 +164,29 @@ const MAX_PDF_BYTES: u64 = 256 * 1024 * 1024;
 fn read_pdf_file(path: &Path) -> Result<Vec<u8>, String> {
     let file = File::open(path).map_err(|e| e.to_string())?;
     let size = file.metadata().map_err(|e| e.to_string())?.len();
-    if size == 0 || size > MAX_PDF_BYTES { return Err("PDF must be between 1 byte and 256 MiB".into()); }
+    if size == 0 || size > MAX_PDF_BYTES {
+        return Err("PDF must be between 1 byte and 256 MiB".into());
+    }
     let mut bytes = Vec::new();
-    file.take(MAX_PDF_BYTES + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-    if bytes.len() as u64 > MAX_PDF_BYTES { return Err("PDF exceeds 256 MiB".into()); }
+    file.take(MAX_PDF_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > MAX_PDF_BYTES {
+        return Err("PDF exceeds 256 MiB".into());
+    }
     Ok(bytes)
 }
 #[tauri::command]
-pub async fn read_source_pdf(app: tauri::AppHandle, path: PathBuf) -> Result<tauri::ipc::Response, String> {
+pub async fn read_source_pdf(
+    app: tauri::AppHandle,
+    path: PathBuf,
+) -> Result<tauri::ipc::Response, String> {
     allowed(&app, &path)?;
-    tauri::async_runtime::spawn_blocking(move || read_pdf_file(&path).map(tauri::ipc::Response::new))
-        .await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        read_pdf_file(&path).map(tauri::ipc::Response::new)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 fn verified_source(source: &Path, size: u64, sha256: &str) -> Result<Vec<u8>, String> {
     use sha2::{Digest, Sha256};
@@ -301,12 +313,14 @@ mod tests {
     use std::fs;
     #[test]
     fn bounded_pdf_read_rejects_empty_and_oversized_before_allocation() {
-        let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("large.pdf");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("large.pdf");
         let file = File::create(&path).unwrap();
         assert!(read_pdf_file(&path).is_err());
         file.set_len(MAX_PDF_BYTES + 1).unwrap();
         assert!(read_pdf_file(&path).is_err());
-        drop(file); fs::write(&path, b"%PDF-small").unwrap();
+        drop(file);
+        fs::write(&path, b"%PDF-small").unwrap();
         assert_eq!(read_pdf_file(&path).unwrap(), b"%PDF-small");
     }
     fn identity(bytes: &[u8]) -> (u64, String) {

@@ -85,7 +85,7 @@ it('missing source Locate cancellation and mismatch retain work, matching reloca
   click('Open Project'); await idle(); expect(screen.getByRole('alert').textContent).toContain('identity mismatch');
   expect(vi.mocked(files.loadSource).mock.calls[1][1].aborted).toBe(true);
   expect(vi.mocked(files.loadSource).mock.calls[0][1].aborted).toBe(false);
-  click('Open Project'); await idle(); expect(status()).toContain('moved.pmarkup');
+  click('Open Project'); await idle(); expect(status()).toContain('moved.pmarkup'); expect(status()).not.toContain('Locate PDF:');
   expect(screen.getByRole('button',{name:'Thick'}).getAttribute('aria-pressed')).toBe('true');
   expect(vi.mocked(files.loadSource).mock.calls[0][1].aborted).toBe(true);
 });
@@ -300,4 +300,15 @@ it('cancelled/failed exports preserve dirty baseline and unmount aborts a pendin
   const pendingExport = deferred<string|null>(); vi.mocked(exports.exportPdf).mockReturnValueOnce(pendingExport.promise);
   click('Export Annotated PDF'); const signal = vi.mocked(exports.exportPdf).mock.calls[2][4]; view.unmount(); expect(signal.aborted).toBe(true);
   await act(async () => pendingExport.resolve('C:/late.pdf'));
+});
+it('export during unfinished move/draw cancels previews and captures only committed geometry',async()=>{
+  const original=await openEditable();selected('one');const pointer=editPointer();
+  pointer('pointerdown',80);pointer('pointermove',110,70);
+  vi.mocked(exports.exportPdf).mockResolvedValue(null);click('Export Annotated PDF');await idle();
+  expect(vi.mocked(exports.exportPdf).mock.calls[0][3].annotations).toEqual(original.session.annotations);
+  pointer('pointerup',110,70);expect(status()).not.toContain('Unsaved changes');
+  click('Highlight');pointer('pointerdown',200);pointer('pointermove',260);click('Export Annotated PDF');await idle();pointer('pointerup',280);
+  expect(vi.mocked(exports.exportPdf).mock.calls[1][3].annotations).toEqual(original.session.annotations);
+  expect(status()).not.toContain('Unsaved changes');
+  expect(screen.getByLabelText('Highlights for page 1').querySelectorAll('[data-annotation-id]')).toHaveLength(2);
 });
