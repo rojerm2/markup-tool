@@ -1,8 +1,9 @@
+import { validPageLegend, type PageLegend } from './pageLegend';
 import type { AnnotationSession } from './annotationSession';
 
 export const MAX_PROJECT_BYTES = 16 * 1024 * 1024;
 export type SourceIdentity = { reference: string; filename: string; sha256: string; size: number; pages: number };
-export type Project = { format: 'pdf-markup-project'; version: 1; source: SourceIdentity; session: AnnotationSession };
+export type Project = { format: 'pdf-markup-project'; version: 2; source: SourceIdentity; session: AnnotationSession };
 const fail = (field: string): never => { throw new Error(`Invalid project: ${field}.`); };
 function object(value: unknown, field: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return fail(field);
@@ -38,7 +39,7 @@ export function parseProject(text: string): Project {
   try { raw = JSON.parse(text); } catch { return fail('JSON syntax'); }
   const root = object(raw, 'root');
   if (root.format !== 'pdf-markup-project') return fail('format');
-  if (root.version !== 1) return fail('unsupported version');
+  if (root.version !== 1 && root.version !== 2) return fail('unsupported version');
   const source = object(root.source, 'source');
   const sha256 = string(source.sha256, 'source hash', 64);
   if (!/^[0-9a-f]{64}$/.test(sha256)) return fail('source SHA-256');
@@ -69,12 +70,19 @@ export function parseProject(text: string): Project {
         const p = object(item, 'point'); return { x: number(p.x, 'point x', -1e9, 1e9), y: number(p.y, 'point y', -1e9, 1e9) };
       }) };
   });
+  const pageLegends = root.version === 1 ? [] : array(session.pageLegends ?? [], 'page legends', 1000).map(item => {
+    const value = object(item, 'page legend');
+    const k = {title:'LEGEND',layout:'list',fontSize:12,width:240,background:true,border:true,...value} as PageLegend;
+    if (!validPageLegend(k,legends,identity.pages) || annotationIds.has(k.id)) return fail('page legend geometry, layout or references');
+    annotationIds.add(k.id);
+    return {id:k.id,page:k.page,x:k.x,y:k.y,rotation:k.rotation,categoryIds:[...k.categoryIds],title:k.title,layout:k.layout,width:k.width,fontSize:k.fontSize,background:k.background,border:k.border};
+  });
   const drawing = style(session.drawing), activeLegendId = relationship(session.activeLegendId);
   if (activeLegendId !== null && legends.find(l => l.id === activeLegendId)!.color !== drawing.color) return fail('active legend/drawing color');
-  return { format: 'pdf-markup-project', version: 1, source: identity, session: { legends, annotations, drawing, activeLegendId } };
+  return { format: 'pdf-markup-project', version: 2, source: identity, session: { legends, annotations, drawing, activeLegendId, ...(pageLegends.length ? {pageLegends} : {}) } };
 }
 export function serializeProject(source: SourceIdentity, session: AnnotationSession): string {
-  const text = JSON.stringify({ format: 'pdf-markup-project', version: 1, source, session });
+  const text = JSON.stringify({ format: 'pdf-markup-project', version: 2, source, session });
   parseProject(text);
   return text;
 }

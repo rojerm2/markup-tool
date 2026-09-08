@@ -13,7 +13,7 @@ export function fixture() {
 }
 it('round trips mixed multipage vectors, stable relationships/order and settings; continued edits remain independent', () => {
   const value = fixture(); const restored = parseProject(serializeProject(value.source, value.session));
-  expect(restored).toEqual(value);
+  expect(restored).toEqual({...value,version:2});
   const detached = sessionReducer(restored.session, { type: 'delete', id: 'door' });
   expect(detached.annotations.map(s => s.legendId)).toEqual(['wall', null, null]);
   expect(detached.annotations.map(s => s.points)).toEqual(value.session.annotations.map(s => s.points));
@@ -22,7 +22,7 @@ it('round trips mixed multipage vectors, stable relationships/order and settings
 });
 describe('runtime validation', () => {
   const cases: [string, (v: ReturnType<typeof fixture>) => void][] = [
-    ['version', v => { v.version = 2 as 1; }], ['format', v => { v.format = 'other' as typeof v.format; }],
+    ['version', v => { v.version = 3 as 1; }], ['format', v => { v.format = 'other' as typeof v.format; }],
     ['duplicate legends', v => { v.session.legends.push(v.session.legends[0]); }],
     ['duplicate names', v => { v.session.legends[1].name = 'WALLS'; }],
     ['blank name', v => { v.session.legends[0].name = ' '; }], ['untrimmed', v => { v.session.legends[0].name = ' Walls'; }],

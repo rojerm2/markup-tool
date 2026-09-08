@@ -22,7 +22,7 @@ export default function EditingControls({ session, selectedId, onSelect, dispatc
       {WIDTHS.map(w => <option key={w.value} value={w.value}>{w.name}</option>)}
     </select></label>
     {COLORS.map(c => <button key={c.value} className="color-swatch" disabled={!stroke} aria-label={`Selected stroke ${c.name}`} aria-pressed={stroke?.color === c.value}
-      onClick={() => edit({ color: c.value })}><span style={{ background: c.value }}>{stroke?.color === c.value ? '✓' : ''}</span></button>)}
+      onClick={() => edit({ color: c.value })}><span style={{ background: c.value }}>{stroke?.color === c.value ? '✓' : ''}</span>{c.name}</button>)}
     <button disabled={!stroke} onClick={() => stroke && dispatch({ type: 'remove-stroke', id: stroke.id })}>Delete stroke</button>
   </div>;
 }

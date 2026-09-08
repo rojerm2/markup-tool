@@ -1,3 +1,4 @@
+import { textError } from '../../services/pageLegend';
 import { useEffect, useId, useState, type Dispatch, type FormEvent } from 'react';
 import { legendNameError, type AnnotationSession, type SessionAction } from '../../services/annotationSession';
 import { COLORS } from './DrawingControls';
@@ -16,7 +17,7 @@ export default function LegendControls({ session, dispatch }: { session: Annotat
   }, [editing, session.legends]);
   function submit(event: FormEvent) {
     event.preventDefault();
-    const message = legendNameError(session.legends, name, editing ?? undefined);
+    const message = legendNameError(session.legends, name, editing ?? undefined) ?? (editing && session.pageLegends?.some(k=>k.categoryIds.includes(editing)) ? textError(name) : null);
     setError(message);
     if (message) return;
     if (editing) dispatch({ type: 'rename', id: editing, name });
@@ -46,7 +47,7 @@ export default function LegendControls({ session, dispatch }: { session: Annotat
             onClick={() => { dispatch({ type: 'delete', id: legend.id }); if (editing === legend.id) reset(); }}>Delete</button>
         </div>)}
       </div>
-      <p id={`${formId}-delete`} className="legend-note">Deleting a legend keeps its strokes and colors, and makes them unassigned.</p>
+      <p id={`${formId}-delete`} className="legend-note">Deleting a category keeps its strokes and colors and makes them unassigned. Its rows are removed from every page legend; empty page legends are removed. Undo restores everything.</p>
       <form onSubmit={submit} className="legend-form">
         <label>{editing ? 'Rename legend' : 'New legend'}<input aria-label="Legend name" maxLength={256} value={name}
           aria-invalid={!!error} aria-describedby={error ? errorId : undefined}
@@ -54,7 +55,7 @@ export default function LegendControls({ session, dispatch }: { session: Annotat
         {!editing && <div className="control-group" role="group" aria-label="New legend color">
           {COLORS.map(item => <button type="button" className="color-swatch" key={item.value}
             aria-label={`Legend color ${item.name}`} aria-pressed={color === item.value} onClick={() => setColor(item.value)}>
-            <span style={{ background: item.value }}>{color === item.value ? '✓' : ''}</span>
+            <span style={{ background: item.value }}>{color === item.value ? '✓' : ''}</span>{item.name}
           </button>)}
         </div>}
         <button type="submit">{editing ? 'Save name' : 'Create legend'}</button>

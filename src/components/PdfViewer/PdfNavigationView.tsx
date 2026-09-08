@@ -1,3 +1,6 @@
+import PageLegendOverlay from '../Annotations/PageLegendOverlay';
+import PageLegendControls from '../Annotations/PageLegendControls';
+import { viewportToPdf } from '../../services/coordinates';
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PDFPageProxy } from "pdfjs-dist";
 import { clampZoom, clientToPdf, fitScale, MAX_ZOOM, MIN_ZOOM, pdfToClient, type Point, type ZoomMode } from "../../services/coordinates";
@@ -29,9 +32,13 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
   function traverse(direction: 'undo' | 'redo') {
     if (disabled) return;
     const changed = onHistory ? onHistory(direction) : history.traverse(direction);
-    if (changed) { setSelectedId(null); refresh(v => v + 1); }
+    if (changed) { setSelectedKey(null); setPlacing(false); setSelectedId(null); refresh(v => v + 1); }
   }
   const { drawing, annotations, activeLegendId } = session;
+  const [placementRows,setPlacementRows]=useState<string[]|null>(null);
+  const rows=placementRows?.filter(id=>session.legends.some(l=>l.id===id))??session.legends.map(l=>l.id);
+  const [placing, setPlacing] = useState(false);
+  const [selectedKey, setSelectedKey] = useState<string|null>(null);
   const [tool, setTool] = useState<'highlight' | 'edit'>('highlight');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [viewRevision, setViewRevision] = useState(0);
@@ -44,6 +51,15 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
       if (!isEditingControl(event.target) && event.ctrlKey && !event.metaKey && !event.altKey
         && ((key === 'z') || (key === 'y' && !event.shiftKey))) {
         event.preventDefault(); traverse(key === 'y' || event.shiftKey ? 'redo' : 'undo'); return;
+      }
+      if(event.key==='Escape') {setPlacing(false);setSelectedKey(null);}
+      if(selectedKey && !isEditingControl(event.target)) {
+        const k=session.pageLegends?.find(k=>k.id===selectedKey);
+        if(k && event.target instanceof Node && root.current?.contains(event.target)) {
+          if(event.key==='Delete'||event.key==='Backspace'){event.preventDefault();dispatch({type:'remove-key',id:k.id});return;}
+          const delta:Record<string,[number,number]>={ArrowLeft:[-2,0],ArrowRight:[2,0],ArrowUp:[0,-2],ArrowDown:[0,2]};
+          if(delta[event.key]) {event.preventDefault();const vp=pages[k.page-1].getViewport({scale:1});const p=viewportToPdf({x:0,y:0},vp),q=viewportToPdf({x:delta[event.key][0],y:delta[event.key][1]},vp);dispatch({type:'put-key',key:{...k,x:k.x+q.x-p.x,y:k.y+q.y-p.y},before:k,legends:session.legends});return;}
+        }
       }
       if (tool !== 'edit') return;
       if (event.key === 'Escape' && !(event.target instanceof Element && event.target.closest('dialog, [role="dialog"]'))) setSelectedId(null);
@@ -69,6 +85,10 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
   const anchor = useRef<{ page: number; point: Point; x: number; y: number } | null>(null);
   const pendingPage = useRef<number | null>(null);
   const pan = useSpacePan(host);
+  useEffect(()=>history.subscribeCancellation(()=>setPlacing(false)),[history]);
+  useEffect(()=>{setPlacing(false);},[viewRevision,mode,zoom,disabled]);
+  useEffect(()=>{const cancel=()=>setPlacing(false);const key=(e:KeyboardEvent)=>{if(e.code==='Space'&&!isEditingControl(e.target))cancel();};window.addEventListener('blur',cancel);window.addEventListener('scroll',cancel,true);window.addEventListener('keydown',key);document.addEventListener('visibilitychange',cancel);return()=>{window.removeEventListener('blur',cancel);window.removeEventListener('scroll',cancel,true);window.removeEventListener('keydown',key);document.removeEventListener('visibilitychange',cancel);};},[]);
+  useEffect(()=>{if(selectedKey&&!session.pageLegends?.some(k=>k.id===selectedKey))setSelectedKey(null);},[session.pageLegends,selectedKey]);
   const scales = pages.map(page => mode === "manual" ? zoom : fitScale(
     page.getViewport({ scale: 1 }),
     { width: size.width - GUTTER, height: size.height - GUTTER - LABEL_HEIGHT }, mode,
@@ -207,7 +227,7 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
   function selectStroke(id: string | null) {
     const stroke = annotations.find(s => s.id === id);
     if (stroke && stroke.page !== current) navigate(stroke.page);
-    setSelectedId(stroke?.id ?? null);
+    setSelectedKey(null); setSelectedId(stroke?.id ?? null);
   }
 
   return <div ref={root} className="pdf-navigation">
@@ -236,13 +256,17 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
         <button disabled={disabled || !history.redoLabel} title={`Redo ${history.redoLabel ?? ''} (Ctrl+Y / Ctrl+Shift+Z)`} aria-keyshortcuts="Control+y Control+Shift+z" onClick={() => traverse('redo')}>Redo</button>
       </div>
       <div className="tool-modes" role="group" aria-label="Annotation mode">
-        <button aria-pressed={tool === 'highlight'} onClick={() => { setTool('highlight'); setSelectedId(null); }}>Highlight</button>
-        <button aria-pressed={tool === 'edit'} onClick={() => setTool('edit')}>Select/Edit</button>
+        <button aria-pressed={tool === 'highlight'} onClick={() => { setPlacing(false); setSelectedKey(null); setTool('highlight'); setSelectedId(null); }}>Highlight</button>
+        <button aria-pressed={tool === 'edit'} onClick={() => {setPlacing(false);setTool('edit');}}>Select/Edit</button>
       </div>
       {tool === 'highlight' ? <DrawingControls value={drawing} onChange={(drawing, manual) => dispatch({ type: 'drawing', drawing, manual })} />
         : <EditingControls session={session} selectedId={selectedId} onSelect={selectStroke} dispatch={dispatch} />}
     </div>
     <LegendControls session={session} dispatch={dispatch} />
+    <PageLegendControls rows={rows} onRows={setPlacementRows} session={session} selected={selectedKey} pages={pages} current={current} placing={placing}
+      history={history} revision={viewRevision} disabled={disabled} dispatch={dispatch}
+      onPlace={()=>{history.invalidate();setPlacing(!placing);setSelectedKey(null);setSelectedId(null);}}
+      onSelect={id=>{const k=session.pageLegends?.find(k=>k.id===id);if(k&&k.page!==current)navigate(k.page);setSelectedKey(id||null);setSelectedId(null);setTool('edit');}}/>
     <div ref={host} {...pan} className={`pdf-scroll ${pan.className}`} tabIndex={0}
       role="region" aria-label="PDF pages" aria-describedby="pan-hint" onScroll={updateCurrent}
       onPointerDown={event => {
@@ -255,9 +279,12 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
             <PdfPage page={page} scale={scales[index]} active={rasterPages.includes(page.pageNumber)}
               pixelBudget={Math.min(16_000_000, 32_000_000 / Math.max(1, rasterPages.length))}>
               <AnnotationOverlay page={page.pageNumber} viewport={viewport} style={drawing} legendId={activeLegendId}
-                history={history} tool={tool} selectedId={selectedId} onSelect={setSelectedId} onAction={dispatch} legends={session.legends} disabled={disabled} viewRevision={viewRevision}
+                history={history} tool={tool} selectedId={selectedId} onSelect={id=>{setSelectedId(id);setSelectedKey(null);}} onAction={dispatch} legends={session.legends} disabled={disabled||placing} viewRevision={viewRevision}
                 annotations={annotations.filter(stroke => stroke.page === page.pageNumber)}
                 onCommit={(stroke, generation) => dispatch({ type: 'commit', stroke }, generation)} />
+              <PageLegendOverlay rows={rows} page={page.pageNumber} viewport={viewport} session={session} history={history} placing={placing}
+                onPlaced={()=>setPlacing(false)} selected={selectedKey} onSelect={id=>{setSelectedKey(id);setSelectedId(null);setTool('edit');}}
+                dispatch={dispatch} editing={tool==='edit'} disabled={disabled} revision={viewRevision}/>
             </PdfPage>
           </div>;
         })}

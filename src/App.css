@@ -84,3 +84,45 @@ dialog h2 { font-weight: 650; } dialog p { margin: 10px 0 16px; }
 .editing-controls select { max-width: 155px; padding: 5px; border: 1px solid #cbd5e1; border-radius: 5px; background: white; }
 .annotation-overlay.is-editing { cursor: default; }
 .annotation-tools :focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+
+@font-face { font-family: LegendSans; src: url('./assets/LegendSans.ttf') format('truetype'); font-display: block; }
+.color-swatch { width: auto; height: 32px; display: inline-flex; align-items: center; gap: 5px; padding: 3px 6px; }
+.page-legend-overlay { position: absolute; inset: 0; overflow: hidden; touch-action: none; }
+.page-key-controls { flex-shrink: 0; background: #f6f5f2; border-bottom: 1px solid #ccc; }
+.page-key-bar { display: flex; align-items: center; gap: 10px; padding: 5px 12px; overflow-x: auto; white-space: nowrap; }
+.page-key-controls select { border: 1px solid #bbb; padding: 5px; background: white; max-width: 180px; }
+.key-properties { padding: 0 12px; }
+.key-properties summary { cursor: pointer; padding: 5px 0; }
+.key-properties-body { display: flex; flex-wrap: wrap; gap: 10px; height: min(180px,24vh); overflow: auto; padding: 6px 0; }
+.key-properties form { flex: 1; min-width: 240px; }
+.key-properties label { display: inline-flex; gap: 6px; align-items: center; margin: 3px 6px 3px 0; }
+.key-properties input[type=number] { width: 80px; }
+.key-properties input:not([type]) { width: 160px; }
+.key-row { display: flex; gap: 4px; align-items: center; margin: 3px 0; }
+.key-row span { flex: 1; overflow-wrap: anywhere; }
+.key-preview { max-width: 300px; max-height: 160px; overflow: auto; background: #e6e4e0; padding: 6px; }
+.key-preview svg { height: auto; max-width: 100%; }
+.key-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; width: 100%; }
+.page-key-controls [role=alert] { color: #9d341a; padding: 3px 12px; }
+@media(max-width:700px) { .key-properties-body { height: 24vh; } .key-preview { display: none; } .drawing-controls { flex-wrap: nowrap; } .drawing-controls .control-group { flex-wrap: nowrap; } }
+
+@media(max-width:700px) { .pdf-navigation:has(.key-properties) > .annotation-tools, .pdf-navigation:has(.key-properties) > .legend-controls { display:none; } .key-properties-body { height: 24vh; } }
+
+.placement-rows { padding: 0 12px; font-size: 12px; } .placement-rows > div { max-height: 100px; overflow:auto; } .placement-rows label { display:inline-flex; align-items:center; gap:5px; margin-right:12px; }
+@media(max-width:700px) {
+  .pdf-navigation { position:relative; }
+  .pdf-navigation:has(.key-properties) > .pdf-scroll { margin-right:min(260px,60vw); }
+  .key-properties { position:absolute; z-index:2; right:0; top:126px; bottom:30px; width:min(260px,60vw); padding:0 8px; background:#f6f5f2; border-left:1px solid #ccc; }
+  .key-properties > summary { font-size:12px; }
+  .key-properties-body { height:calc(100% - 46px); display:block; }
+  .key-properties form { min-width:0; }
+  .key-properties label { display:flex; flex-wrap:wrap; }
+  .key-properties input:not([type]) { max-width:100%; }
+  .key-actions { margin-top:12px; }
+  .key-preview { display:block; margin-top:10px; }
+}
+@media(max-width:550px) { .key-properties { top:90px; } }
+@media(max-width:700px) { .key-properties { height:calc(100% - 156px); overflow:hidden; } }
+@media(max-width:550px) { .key-properties { height:calc(100% - 120px); } }
+@media(max-width:700px) { .key-properties { overflow:auto; } .key-properties-body { height:auto; } }
+@media(max-width:550px) { .key-properties { bottom:46px; height:calc(100% - 136px); } }
