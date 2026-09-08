@@ -1,3 +1,4 @@
+import { highlightOutline, svgPath } from '../../services/highlightGeometry';
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import { clientToPdf, pdfToViewport, pdfWidthToViewport, type PageViewport, type Point } from '../../services/coordinates';
 import { DEFAULT_DRAWING, type DrawingStyle } from './DrawingControls';
@@ -124,7 +125,7 @@ export default function AnnotationOverlay({ page, viewport, annotations, onCommi
     }}
     onPointerCancel={cancel} onLostPointerCapture={cancel}>
     {[...groups].map(([key, strokes]) => <g key={key} opacity={strokes[0].opacity} data-highlight-layer={key}>
-      {strokes.map(stroke => <polyline key={stroke.id}
+      {strokes.map(stroke => (stroke.rounding ?? 100) < 100 ? <path key={stroke.id} data-annotation-id={stroke.id} data-legend-id={stroke.legendId ?? ''} data-draft={stroke === preview ? 'true' : undefined} d={svgPath(highlightOutline(stroke), p => pdfToViewport(p, viewport))} fill={stroke.color} pointerEvents="none" /> : <polyline key={stroke.id}
       data-annotation-id={stroke.id} data-legend-id={stroke.legendId ?? ''} data-draft={stroke === preview ? 'true' : undefined}
       points={stroke.points.map(p => { const v = pdfToViewport(p, viewport); return `${v.x},${v.y}`; }).join(' ')}
       fill="none" stroke={stroke.color} strokeWidth={pdfWidthToViewport(stroke.width, viewport)}

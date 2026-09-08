@@ -3,6 +3,7 @@ import { sessionReducer, type AnnotationSession, type SessionAction } from './an
 export const HISTORY_LIMIT = 100;
 type Transaction = { before: AnnotationSession; after: AnnotationSession; label: string };
 const labels: Record<SessionAction['type'], string> = {
+  'put-shape': 'Draw/edit shape', 'remove-shape': 'Delete shape',
   'put-key': 'Place/edit page legend', 'remove-key': 'Delete page legend',
   commit: 'Draw stroke', 'move-stroke': 'Move stroke', 'remove-stroke': 'Delete stroke',
   'edit-stroke': 'Edit stroke', create: 'Create legend', rename: 'Rename legend',
@@ -23,6 +24,9 @@ export class SessionHistory {
   private past: Transaction[] = [];
   private future: Transaction[] = [];
   generation = 0;
+  private snapshotCancellations = new Set<() => void>();
+  subscribeSnapshotCancellation = (cancel: () => void) => { this.snapshotCancellations.add(cancel); return () => { this.snapshotCancellations.delete(cancel); }; };
+  cancelSnapshotDrafts() { this.snapshotCancellations.forEach(cancel => cancel()); }
   private cancellations = new Set<() => void>();
   constructor(session: AnnotationSession) { this.present = session; }
   get undoLabel() { return this.past[this.past.length - 1]?.label; }

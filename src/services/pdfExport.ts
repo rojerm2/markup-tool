@@ -1,3 +1,5 @@
+import { shapePath } from './shapes';
+import { highlightOutline } from './highlightGeometry';
 import fontkit from '@pdf-lib/fontkit';
 import fontUrl from '../assets/LegendSans.ttf?url';
 import { keyMatrix, layoutLegend, legendTextError, textWidth } from './pageLegend';
@@ -28,7 +30,8 @@ export async function generateAnnotatedPdf(source: Uint8Array, session: Annotati
   for (const [index, page] of pdf.getPages().entries()) {
     const strokes = byPage.get(index + 1) ?? [];
     const pageKeys=keys.filter(k=>k.page===index+1);
-    if (!strokes.length && !pageKeys.length) continue;
+    const shapes=(session.shapes??[]).filter(s=>s.page===index+1);
+    if (!strokes.length && !pageKeys.length && !shapes.length) continue;
     const crop = page.getCropBox(), media = page.getMediaBox();
     let bounds = [Math.max(crop.x, media.x), Math.max(crop.y, media.y),
       Math.min(crop.x + crop.width, media.x + media.width), Math.min(crop.y + crop.height, media.y + media.height)];
@@ -41,8 +44,13 @@ export async function generateAnnotatedPdf(source: Uint8Array, session: Annotati
     for (const group of highlightGroups(strokes).values()) {
       const { color, opacity } = group[0];
       const rgb = [1, 3, 5].map(i => pdfNumber(parseInt(color.slice(i, i + 2), 16) / 255)).join(' ');
-      const paths = [`${rgb} RG`, '1 J 1 j'];
+      const paths = [`${rgb} RG`, `${rgb} rg`, '1 J 1 j'];
       for (const stroke of group) {
+        if ((stroke.rounding ?? 100) < 100) {
+          for (const c of highlightOutline(stroke)) paths.push(c.op === 'Z' ? 'h' : `${c.points.flatMap(p => [pdfNumber(p.x), pdfNumber(p.y)]).join(' ')} ${c.op.toLowerCase()}`);
+          paths.push('f');
+          continue;
+        }
         paths.push(`${pdfNumber(stroke.width)} w`);
         stroke.points.forEach((p, i) => paths.push(`${pdfNumber(p.x)} ${pdfNumber(p.y)} ${i ? 'l' : 'm'}`));
         paths.push('S');
@@ -56,6 +64,14 @@ export async function generateAnnotatedPdf(source: Uint8Array, session: Annotati
       const name = page.node.newXObject('Markup', form);
       const state = page.node.newExtGState('MarkupAlpha', context.obj({ Type: 'ExtGState', CA: opacity, ca: opacity, BM: 'Normal', SMask: 'None' }));
       commands.push(`q ${state} gs ${name} Do Q`);
+    }
+    for(const s of shapes) {
+      const state=page.node.newExtGState('ShapeAlpha',context.obj({Type:'ExtGState',CA:1,ca:.2,BM:'Normal',SMask:'None'}));
+      const rgb=(color:string)=>[1,3,5].map(i=>pdfNumber(parseInt(color.slice(i,i+2),16)/255)).join(' ');
+      commands.push(`q ${state} gs ${bounds.map(pdfNumber).slice(0,2).join(' ')} ${pdfNumber(bounds[2]-bounds[0])} ${pdfNumber(bounds[3]-bounds[1])} re W n`, `${rgb(s.color)} RG`, `${pdfNumber(s.width)} w 1 J 0 j 2 M`);
+      if(s.fill)commands.push(`${rgb(s.fill)} rg`);
+      for(const c of shapePath(s))commands.push(c.op==='Z'?'h':`${c.points.flatMap(p=>[pdfNumber(p.x),pdfNumber(p.y)]).join(' ')} ${c.op.toLowerCase()}`);
+      commands.push(s.fill?'B':'S','Q');
     }
     if(font) {
       const fontName=page.node.newFontDictionary('LegendFont',font.ref);

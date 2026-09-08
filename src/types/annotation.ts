@@ -10,4 +10,5 @@ export type Highlight = {
   color: string;
   width: number;
   opacity: number;
+  rounding?: number;
 };

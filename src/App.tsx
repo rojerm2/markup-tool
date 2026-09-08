@@ -51,6 +51,7 @@ export default function App() {
   async function saveCurrent(as = false): Promise<boolean> {
     const snapshot = live.current;
     if (!snapshot) return false;
+    snapshot.history.cancelSnapshotDrafts();
     const serialized = serializeProject(snapshot.source, snapshot.session);
     const saved = JSON.stringify(snapshot.session);
     const path = await writeProject(as ? null : snapshot.projectPath, snapshot.sourcePath, serialized);

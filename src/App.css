@@ -126,3 +126,29 @@ dialog h2 { font-weight: 650; } dialog p { margin: 10px 0 16px; }
 @media(max-width:550px) { .key-properties { height:calc(100% - 120px); } }
 @media(max-width:700px) { .key-properties { overflow:auto; } .key-properties-body { height:auto; } }
 @media(max-width:550px) { .key-properties { bottom:46px; height:calc(100% - 136px); } }
+
+.rounding-control { flex-shrink:0; padding:6px; }
+.rounding-control summary { cursor:pointer; white-space:nowrap; }
+.rounding-popover { position:fixed; z-index:5; right:12px; top:140px; width:min(290px,calc(100vw - 24px)); max-height:calc(100% - 180px); overflow:auto; padding:12px; background:#fff; border:1px solid #94a3b8; border-radius:8px; box-shadow:0 4px 16px #0003; white-space:normal; }
+.rounding-presets { display:flex; gap:4px; margin:8px 0; }
+.rounding-presets button { padding:3px; flex:1; }
+.rounding-presets svg { display:block; width:100%; }
+.rounding-popover input { display:block; width:100%; min-height:32px; }
+.rounding-popover small { display:block; }
+
+.shape-overlay { position:absolute; inset:0; overflow:hidden; touch-action:none; }
+.shape-controls { display:flex; align-items:center; gap:8px; padding:6px; flex-shrink:0; white-space:nowrap; }
+.shape-controls label, .shape-tool-label { display:flex; align-items:center; gap:4px; }
+.shape-controls select { max-width:160px; }
+.shape-tool-label { padding:6px; flex-shrink:0; }
+
+.rounding-close { display:block; margin:6px 0; }
+
+/* M13: keep a usable plan beside compact tools when existing settings are open. */
+@media(max-width:700px) {
+  .pdf-controls { flex-wrap:nowrap; overflow-x:auto; flex-shrink:0; }
+  .pdf-controls .control-group { flex-wrap:nowrap; flex-shrink:0; }
+  .legend-editor { max-height:48px; box-sizing:border-box; }
+}
+
+[data-shape-handle]:focus-visible { stroke:#172554; stroke-width:3px; outline:none; }

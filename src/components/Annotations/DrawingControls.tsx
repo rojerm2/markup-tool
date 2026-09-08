@@ -13,7 +13,7 @@ export const COLORS = [
   { name: 'Gray', value: '#94a3b8' },
 ];
 export const WIDTHS = [{ name: 'Thin', value: 5 }, { name: 'Medium', value: 10 }, { name: 'Thick', value: 20 }];
-export type DrawingStyle = { color: string; width: number; opacity: number };
+export type DrawingStyle = { color: string; width: number; opacity: number; rounding?: number };
 export const DEFAULT_DRAWING: DrawingStyle = { color: COLORS[0].value, width: 10, opacity: 0.4 };
 
 export default function DrawingControls({ value, onChange }: { value: DrawingStyle; onChange: (value: DrawingStyle, manual: boolean) => void }) {

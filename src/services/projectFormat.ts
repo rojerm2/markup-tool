@@ -1,3 +1,4 @@
+import { validShape, MAX_SHAPES, SHAPE_DEFAULTS, type Shape } from './shapes';
 import { validPageLegend, type PageLegend } from './pageLegend';
 import type { AnnotationSession } from './annotationSession';
 
@@ -31,7 +32,7 @@ function array(value: unknown, field: string, max: number): unknown[] {
 }
 function style(value: unknown) {
   const v = object(value, 'drawing style');
-  return { color: color(v.color), width: number(v.width, 'width', 0.01, 10000), opacity: number(v.opacity, 'opacity', 0.01, 1) };
+  return { ...(v.rounding === undefined || v.rounding === 100 ? {} : {rounding: number(v.rounding, 'rounding', 0, 100)}), color: color(v.color), width: number(v.width, 'width', 0.01, 10000), opacity: number(v.opacity, 'opacity', 0.01, 1) };
 }
 export function parseProject(text: string): Project {
   if (new TextEncoder().encode(text).length > MAX_PROJECT_BYTES) return fail('file exceeds 16 MiB');
@@ -77,9 +78,15 @@ export function parseProject(text: string): Project {
     annotationIds.add(k.id);
     return {id:k.id,page:k.page,x:k.x,y:k.y,rotation:k.rotation,categoryIds:[...k.categoryIds],title:k.title,layout:k.layout,width:k.width,fontSize:k.fontSize,background:k.background,border:k.border};
   });
+  const shapes = root.version === 1 ? [] : array(session.shapes ?? [], 'shapes', MAX_SHAPES).map(item => {
+    const value = object(item, 'shape'), s = {...SHAPE_DEFAULTS,...value} as Shape;
+    if(!validShape(s,identity.pages)||ids.has(s.id)||annotationIds.has(s.id))return fail('shape geometry, style or ID');
+    annotationIds.add(s.id);
+    return {id:s.id,type:s.type,page:s.page,a:{x:s.a.x,y:s.a.y},b:{x:s.b.x,y:s.b.y},color:s.color,width:s.width,fill:s.fill};
+  });
   const drawing = style(session.drawing), activeLegendId = relationship(session.activeLegendId);
   if (activeLegendId !== null && legends.find(l => l.id === activeLegendId)!.color !== drawing.color) return fail('active legend/drawing color');
-  return { format: 'pdf-markup-project', version: 2, source: identity, session: { legends, annotations, drawing, activeLegendId, ...(pageLegends.length ? {pageLegends} : {}) } };
+  return { format: 'pdf-markup-project', version: 2, source: identity, session: { legends, annotations, drawing, activeLegendId, ...(shapes.length ? {shapes} : {}), ...(pageLegends.length ? {pageLegends} : {}) } };
 }
 export function serializeProject(source: SourceIdentity, session: AnnotationSession): string {
   const text = JSON.stringify({ format: 'pdf-markup-project', version: 2, source, session });

@@ -1,3 +1,4 @@
+import { highlightOutline, outlineContains } from './highlightGeometry';
 import type { Highlight } from '../types/annotation';
 import { clientToPdf, pdfToClient, pdfWidthToViewport, type PageRect, type PageViewport, type Point } from './coordinates';
 
@@ -22,6 +23,7 @@ function segmentDistance(p: Point, a: Point, b: Point): number {
 export function pickHighlight(strokes: Highlight[], point: Point, rect: PageRect, viewport: PageViewport): Highlight | null {
   const ordered = [...highlightGroups(strokes).values()].flat().reverse();
   return ordered.find(stroke => {
+    if ((stroke.rounding ?? 100) < 100) return outlineContains(highlightOutline(stroke), clientToPdf(point, rect, viewport), 4 / (pdfWidthToViewport(1, viewport) * rect.width / viewport.width));
     const points = stroke.points.map(p => pdfToClient(p, rect, viewport));
     const radius = pdfWidthToViewport(stroke.width, viewport) * Math.max(rect.width / viewport.width, rect.height / viewport.height) / 2 + 4;
     return points.some((p, i) => i > 0 && segmentDistance(point, points[i-1], p) <= radius);

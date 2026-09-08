@@ -1,9 +1,12 @@
+import { validShape, MAX_SHAPES, type Shape } from './shapes';
+import { validRounding } from './highlightGeometry';
 import { validPageLegend, legendTextError, textError, type PageLegend } from './pageLegend';
 import type { Highlight } from '../types/annotation';
 import { DEFAULT_DRAWING, type DrawingStyle } from '../components/Annotations/DrawingControls';
 
 export type Legend = { id: string; name: string; color: string };
 export type AnnotationSession = {
+  shapes?: Shape[];
   pageLegends?: PageLegend[];
   legends: Legend[];
   activeLegendId: string | null;
@@ -22,6 +25,8 @@ export function legendNameError(legends: Legend[], name: string, exceptId?: stri
   return null;
 }
 export type SessionAction =
+  | { type: 'put-shape'; shape: Shape; before?: Shape }
+  | { type: 'remove-shape'; id: string }
   | { type: 'put-key'; key: PageLegend; before?: PageLegend; legends: Legend[] }
   | { type: 'remove-key'; id: string }
   | { type: 'create'; legend: Legend }
@@ -30,12 +35,12 @@ export type SessionAction =
   | { type: 'select'; id: string | null }
   | { type: 'drawing'; drawing: DrawingStyle; manual: boolean }
   | { type: 'remove-stroke'; id: string }
-  | { type: 'edit-stroke'; id: string; edit: { legendId: string | null } | { color: string } | { width: number } }
+  | { type: 'edit-stroke'; id: string; edit: { legendId: string | null } | { color: string } | { width: number } | { rounding: number }; before?: Highlight }
   | { type: 'move-stroke'; before: Highlight; points: Highlight['points']; legends: Legend[] }
   | { type: 'commit'; stroke: Highlight };
 
 const validColor = (color: string) => /^#[0-9a-f]{6}$/.test(color);
-const validStyle = (style: DrawingStyle) => validColor(style.color) && Number.isFinite(style.width) && style.width >= .01 && style.width <= 10000 && Number.isFinite(style.opacity) && style.opacity >= .01 && style.opacity <= 1;
+const validStyle = (style: DrawingStyle) => validRounding(style.rounding) && validColor(style.color) && Number.isFinite(style.width) && style.width >= .01 && style.width <= 10000 && Number.isFinite(style.opacity) && style.opacity >= .01 && style.opacity <= 1;
 
 function withPageLegends(state: AnnotationSession, keys: PageLegend[]): AnnotationSession {
   if (keys.length) return { ...state, pageLegends: keys };
@@ -46,10 +51,21 @@ function withPageLegends(state: AnnotationSession, keys: PageLegend[]): Annotati
 
 export function sessionReducer(state: AnnotationSession, action: SessionAction): AnnotationSession {
   switch (action.type) {
+    case 'put-shape': {
+      const shapes=state.shapes??[],s=action.shape;
+      if(!validShape(s)||state.legends.some(l=>l.id===s.id)||state.annotations.some(a=>a.id===s.id)||state.pageLegends?.some(k=>k.id===s.id)
+        ||(action.before ? !shapes.includes(action.before)||action.before.id!==s.id||action.before.page!==s.page||action.before.type!==s.type : shapes.length>=MAX_SHAPES||shapes.some(a=>a.id===s.id)))return state;
+      return {...state,shapes:action.before ? shapes.map(a=>a===action.before?s:a) : [...shapes,s]};
+    }
+    case 'remove-shape': {
+      if(!state.shapes?.some(s=>s.id===action.id))return state;
+      const shapes=state.shapes.filter(s=>s.id!==action.id),next={...state};
+      if(shapes.length)next.shapes=shapes;else delete next.shapes;return next;
+    }
     case 'put-key': {
       const keys = state.pageLegends ?? [];
       if (action.legends !== state.legends || !validPageLegend(action.key,state.legends) || legendTextError(action.key,state.legends)
-        || state.annotations.some(s=>s.id===action.key.id)
+        || state.shapes?.some(s=>s.id===action.key.id) || state.annotations.some(s=>s.id===action.key.id)
         || (action.before ? !keys.includes(action.before) || action.before.id !== action.key.id : keys.some(k=>k.id===action.key.id) || keys.length >= 1000)) return state;
       return {...state,pageLegends:action.before ? keys.map(k=>k===action.before?action.key:k) : [...keys,action.key]};
     }
@@ -60,7 +76,7 @@ export function sessionReducer(state: AnnotationSession, action: SessionAction):
         ? { ...state, annotations: state.annotations.filter(s => s.id !== action.id) } : state;
     case 'edit-stroke': {
       const before = state.annotations.find(s => s.id === action.id);
-      if (!before) return state;
+      if (!before || action.before && action.before !== before) return state;
       let after: Highlight;
       if ('legendId' in action.edit) {
         const id = action.edit.legendId;
@@ -70,11 +86,15 @@ export function sessionReducer(state: AnnotationSession, action: SessionAction):
       } else if ('color' in action.edit) {
         if (!/^#[0-9a-f]{6}$/.test(action.edit.color)) return state;
         after = { ...before, color: action.edit.color, legendId: null };
+      } else if ('rounding' in action.edit) {
+        if (!validRounding(action.edit.rounding)) return state;
+        after = { ...before };
+        if (action.edit.rounding === 100) delete after.rounding; else after.rounding = action.edit.rounding;
       } else {
         if (!Number.isFinite(action.edit.width) || action.edit.width < .01 || action.edit.width > 10000) return state;
         after = { ...before, width: action.edit.width };
       }
-      return before.legendId === after.legendId && before.color === after.color && before.width === after.width ? state
+      return before.legendId === after.legendId && before.color === after.color && before.width === after.width && (before.rounding ?? 100) === (after.rounding ?? 100) ? state
         : { ...state, annotations: state.annotations.map(s => s === before ? after : s) };
     }
     case 'move-stroke': {
@@ -88,7 +108,7 @@ export function sessionReducer(state: AnnotationSession, action: SessionAction):
       return { ...state, annotations: state.annotations.map(s => s === action.before ? { ...s, points: action.points } : s) };
     }
     case 'create':
-      if (!action.legend.id || state.pageLegends?.some(k=>k.id===action.legend.id) || !validColor(action.legend.color) || state.legends.some(item => item.id === action.legend.id) || legendNameError(state.legends, action.legend.name)) return state;
+      if (!action.legend.id || state.shapes?.some(s=>s.id===action.legend.id) || state.pageLegends?.some(k=>k.id===action.legend.id) || !validColor(action.legend.color) || state.legends.some(item => item.id === action.legend.id) || legendNameError(state.legends, action.legend.name)) return state;
       return { ...state, legends: [...state.legends, { ...action.legend, name: action.legend.name.trim() }],
         activeLegendId: action.legend.id, drawing: { ...state.drawing, color: action.legend.color } };
     case 'rename':
@@ -110,7 +130,7 @@ export function sessionReducer(state: AnnotationSession, action: SessionAction):
         && state.legends.find(l => l.id === state.activeLegendId)?.color !== action.drawing.color)) return state;
       return { ...state, drawing: action.drawing, activeLegendId: action.manual ? null : state.activeLegendId };
     case 'commit':
-      if (!action.stroke.id || state.annotations.some(s => s.id === action.stroke.id) || !validStyle(action.stroke)
+      if (!action.stroke.id || state.shapes?.some(s=>s.id===action.stroke.id) || state.pageLegends?.some(k=>k.id===action.stroke.id) || state.annotations.some(s => s.id === action.stroke.id) || !validStyle(action.stroke)
         || action.stroke.type !== 'freehand' || !Number.isInteger(action.stroke.page) || action.stroke.page < 1
         || action.stroke.points.length < 2 || action.stroke.points.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y) || Math.abs(p.x) > 1e9 || Math.abs(p.y) > 1e9)) return state;
       // Resolve against current session state, including deletion during a gesture.
