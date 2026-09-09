@@ -1,3 +1,4 @@
+import { ARROW_DEFAULTS, TEXT_DEFAULTS, MAX_NOTES, validNotes, type NoteObject } from './notes';
 import { validShape, MAX_SHAPES, SHAPE_DEFAULTS, type Shape } from './shapes';
 import { validPageLegend, type PageLegend } from './pageLegend';
 import type { AnnotationSession } from './annotationSession';
@@ -84,9 +85,17 @@ export function parseProject(text: string): Project {
     annotationIds.add(s.id);
     return {id:s.id,type:s.type,page:s.page,a:{x:s.a.x,y:s.a.y},b:{x:s.b.x,y:s.b.y},color:s.color,width:s.width,fill:s.fill};
   });
+  const notes = root.version===1 ? [] : array(session.notes??[], 'notes', MAX_NOTES).map(item=> {
+    const value=object(item,'note');
+    if(value.type==='arrow')return {...ARROW_DEFAULTS,...value} as NoteObject;
+    const n: Record<string,unknown>={...TEXT_DEFAULTS,...value};
+    n.pointers=array(n.pointers,'note pointers',32).map(p=>({...ARROW_DEFAULTS,...object(p,'pointer')}));
+    return n as NoteObject;
+  });
+  if(!validNotes(notes,[...ids,...annotationIds],identity.pages))return fail('note text, geometry, pointers or duplicate IDs');
   const drawing = style(session.drawing), activeLegendId = relationship(session.activeLegendId);
   if (activeLegendId !== null && legends.find(l => l.id === activeLegendId)!.color !== drawing.color) return fail('active legend/drawing color');
-  return { format: 'pdf-markup-project', version: 2, source: identity, session: { legends, annotations, drawing, activeLegendId, ...(shapes.length ? {shapes} : {}), ...(pageLegends.length ? {pageLegends} : {}) } };
+  return { format: 'pdf-markup-project', version: 2, source: identity, session: { ...(notes.length?{notes}:{}), legends, annotations, drawing, activeLegendId, ...(shapes.length ? {shapes} : {}), ...(pageLegends.length ? {pageLegends} : {}) } };
 }
 export function serializeProject(source: SourceIdentity, session: AnnotationSession): string {
   const text = JSON.stringify({ format: 'pdf-markup-project', version: 2, source, session });

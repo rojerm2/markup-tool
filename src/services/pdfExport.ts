@@ -1,3 +1,5 @@
+import { arrowGeometry, layoutNote, noteMatrix, pointerOrigin, validNotes, type ArrowStyle } from './notes';
+import type { Point } from './coordinates';
 import { shapePath } from './shapes';
 import { highlightOutline } from './highlightGeometry';
 import fontkit from '@pdf-lib/fontkit';
@@ -18,10 +20,12 @@ export function pdfNumber(value: number): string {
 export async function generateAnnotatedPdf(source: Uint8Array, session: AnnotationSession, fontBytes?: Uint8Array): Promise<Uint8Array> {
   const pdf = await PDFDocument.load(source, { updateMetadata: false });
   const context = pdf.context;
+  const notes=session.notes??[];
+  if(!validNotes(notes,[],pdf.getPageCount()))throw new Error('Invalid note or arrow data.');
   const keys = session.pageLegends ?? [];
   for(const k of keys) { const error=legendTextError(k,session.legends); if(error) throw new Error(error); }
   pdf.registerFontkit(fontkit);
-  const font = keys.length ? await pdf.embedFont(fontBytes ?? new Uint8Array(await (await fetch(fontUrl)).arrayBuffer()), {subset:true}) : null;
+  const font = keys.length || notes.some(n=>n.type==='text') ? await pdf.embedFont(fontBytes ?? new Uint8Array(await (await fetch(fontUrl)).arrayBuffer()), {subset:true}) : null;
   const byPage = new Map<number, AnnotationSession['annotations']>();
   for (const stroke of session.annotations) {
     const strokes = byPage.get(stroke.page) ?? [];
@@ -31,7 +35,8 @@ export async function generateAnnotatedPdf(source: Uint8Array, session: Annotati
     const strokes = byPage.get(index + 1) ?? [];
     const pageKeys=keys.filter(k=>k.page===index+1);
     const shapes=(session.shapes??[]).filter(s=>s.page===index+1);
-    if (!strokes.length && !pageKeys.length && !shapes.length) continue;
+    const pageNotes=notes.filter(n=>n.page===index+1);
+    if (!pageNotes.length && !strokes.length && !pageKeys.length && !shapes.length) continue;
     const crop = page.getCropBox(), media = page.getMediaBox();
     let bounds = [Math.max(crop.x, media.x), Math.max(crop.y, media.y),
       Math.min(crop.x + crop.width, media.x + media.width), Math.min(crop.y + crop.height, media.y + media.height)];
@@ -72,6 +77,29 @@ export async function generateAnnotatedPdf(source: Uint8Array, session: Annotati
       if(s.fill)commands.push(`${rgb(s.fill)} rg`);
       for(const c of shapePath(s))commands.push(c.op==='Z'?'h':`${c.points.flatMap(p=>[pdfNumber(p.x),pdfNumber(p.y)]).join(' ')} ${c.op.toLowerCase()}`);
       commands.push(s.fill?'B':'S','Q');
+    }
+    const rgb=(color:string)=>[1,3,5].map(i=>pdfNumber(parseInt(color.slice(i,i+2),16)/255)).join(' ');
+    const noteOpaque=pageNotes.length?page.node.newExtGState('NoteOpaque',context.obj({Type:'ExtGState',CA:1,ca:1,BM:'Normal',SMask:'None'})):null;
+    const clip=`${bounds.map(pdfNumber).slice(0,2).join(' ')} ${pdfNumber(bounds[2]-bounds[0])} ${pdfNumber(bounds[3]-bounds[1])} re W n`;
+    const arrow=(a:Point,b:Point,style:ArrowStyle)=>{
+      const geometry=arrowGeometry(a,b,style);
+      commands.push(`q ${noteOpaque} gs ${clip}`,`${rgb(style.color)} RG ${rgb(style.color)} rg ${pdfNumber(style.width)} w 0 J`);
+      for(const [path,paint] of [[geometry.shaft,'S'],[geometry.head,'f']] as const){
+        for(const c of path)commands.push(c.op==='Z'?'h':`${c.points.flatMap(p=>[pdfNumber(p.x),pdfNumber(p.y)]).join(' ')} ${c.op.toLowerCase()}`);
+        if(path.length)commands.push(paint);
+      }
+      commands.push('Q');
+    };
+    const noteFont=font?page.node.newFontDictionary('NoteFont',font.ref):null;
+    for(const n of pageNotes) {
+      if(n.type==='arrow'){arrow(n.a,n.b,n);continue;}
+      for(const p of n.pointers){const a=pointerOrigin(n,p.target);if(a)arrow(a,p.target,p);}
+      commands.push(`q ${noteOpaque} gs ${clip}`,`${noteMatrix(n).map(pdfNumber).join(' ')} cm`);
+      if(n.background)commands.push(`1 1 1 rg 0 0 ${pdfNumber(n.width)} ${pdfNumber(n.height)} re f`);
+      if(n.border)commands.push(`${rgb(n.color)} RG .5 w 0 0 ${pdfNumber(n.width)} ${pdfNumber(n.height)} re S`);
+      commands.push(`${rgb(n.color)} rg`);
+      layoutNote(n).lines.forEach((line,i)=>{let x=8;for(const c of line){commands.push(`BT ${noteFont} ${n.fontSize} Tf 1 0 0 -1 ${pdfNumber(x)} ${pdfNumber(8+n.fontSize+i*n.fontSize*1.4)} Tm ${font!.encodeText(c)} Tj ET`);x+=textWidth(c,n.fontSize);}});
+      commands.push('Q');
     }
     if(font) {
       const fontName=page.node.newFontDictionary('LegendFont',font.ref);

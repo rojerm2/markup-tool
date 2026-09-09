@@ -1,3 +1,6 @@
+import NoteOverlay from '../Annotations/NoteOverlay';
+import NoteControls from '../Annotations/NoteControls';
+import { moveNote, type TextNote } from '../../services/notes';
 import ShapeOverlay from '../Annotations/ShapeOverlay';
 import ShapeControls from '../Annotations/ShapeControls';
 import { SHAPE_DEFAULTS, moveShape, type Shape, type ShapeKind } from '../../services/shapes';
@@ -36,14 +39,18 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
   function traverse(direction: 'undo' | 'redo') {
     if (disabled) return;
     const changed = onHistory ? onHistory(direction) : history.traverse(direction);
-    if (changed) { setSelectedShape(null); setSelectedKey(null); setPlacing(false); setSelectedId(null); refresh(v => v + 1); }
+    if (changed) { setSelectedNote(null); setSelectedPointer(null); setSelectedShape(null); setSelectedKey(null); setPlacing(false); setSelectedId(null); refresh(v => v + 1); }
   }
   const { drawing, annotations, activeLegendId } = session;
   const [placementRows,setPlacementRows]=useState<string[]|null>(null);
   const rows=placementRows?.filter(id=>session.legends.some(l=>l.id===id))??session.legends.map(l=>l.id);
   const [placing, setPlacing] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string|null>(null);
-  const [tool, setTool] = useState<'highlight' | 'edit' | ShapeKind>('highlight');
+  const [tool, setTool] = useState<'highlight' | 'edit' | 'text' | 'arrow' | ShapeKind>('highlight');
+  const [selectedNote,setSelectedNote]=useState<string|null>(null);
+  const [selectedPointer,setSelectedPointer]=useState<string|null>(null);
+  const [editingNote,setEditingNote]=useState<TextNote|null>(null);
+  const [pointerPlacement,setPointerPlacement]=useState<string|null>(null);
   const [selectedShape, setSelectedShape] = useState<string|null>(null);
   const [shapeStyle,setShapeStyle] = useState<Pick<Shape,'color'|'width'|'fill'>>(SHAPE_DEFAULTS);
   const currentShape=session.shapes?.find(s=>s.id===selectedShape);
@@ -61,7 +68,16 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
         && ((key === 'z') || (key === 'y' && !event.shiftKey))) {
         event.preventDefault(); traverse(key === 'y' || event.shiftKey ? 'redo' : 'undo'); return;
       }
-      if(event.key==='Escape') {setPlacing(false);setSelectedKey(null);setSelectedShape(null);}
+      if(event.key==='Escape') {setPointerPlacement(null);setEditingNote(null);setSelectedNote(null);setSelectedPointer(null);setPlacing(false);setSelectedKey(null);setSelectedShape(null);}
+      if(selectedNote && !isEditingControl(event.target) && event.target instanceof Node && root.current?.contains(event.target)) {
+        const n=session.notes?.find(n=>n.id===selectedNote);
+        if(n) {
+          if(event.key==='Delete'||event.key==='Backspace'){event.preventDefault();if(n.type==='text'&&selectedPointer)dispatch({type:'put-note',before:n,note:{...n,pointers:n.pointers.filter(p=>p.id!==selectedPointer)}});else dispatch({type:'remove-note',id:n.id});return;}
+          const delta:Record<string,[number,number]>={ArrowLeft:[-2,0],ArrowRight:[2,0],ArrowUp:[0,-2],ArrowDown:[0,2]};
+          if(delta[event.key]){event.preventDefault();const vp=pages[n.page-1].getViewport({scale:1}),p=viewportToPdf({x:0,y:0},vp),q=viewportToPdf({x:delta[event.key][0],y:delta[event.key][1]},vp),dx=q.x-p.x,dy=q.y-p.y;
+            dispatch({type:'put-note',before:n,note:n.type==='text'&&selectedPointer?{...n,pointers:n.pointers.map(v=>v.id===selectedPointer?{...v,target:{x:v.target.x+dx,y:v.target.y+dy}}:v)}:moveNote(n,dx,dy)});return;}
+        }
+      }
       if(selectedShape && !isEditingControl(event.target) && event.target instanceof Node && root.current?.contains(event.target)) {
         const s=session.shapes?.find(s=>s.id===selectedShape);
         if(s) {
@@ -125,6 +141,9 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
     setRasterPages(previous => previous.join(',') === nearby.join(',') ? previous : nearby);
   }
   useLayoutEffect(updateRasterPages, [mode, zoom, size, current, pages]);
+  useEffect(()=>{const cancel=(e?:Event)=>{if(e?.type==='scroll'&&e.target instanceof Element&&e.target.closest('.note-properties'))return;setPointerPlacement(null);setEditingNote(null);};const a=history.subscribeCancellation(cancel),b=history.subscribeSnapshotCancellation(cancel);window.addEventListener('blur',cancel);window.addEventListener('scroll',cancel,true);return()=>{a();b();window.removeEventListener('blur',cancel);window.removeEventListener('scroll',cancel,true);};},[history]);
+  useEffect(()=>{setPointerPlacement(null);setEditingNote(null);},[tool,viewRevision,mode,zoom,disabled]);
+  useEffect(()=>{if(selectedNote&&!session.notes?.some(n=>n.id===selectedNote))setSelectedNote(null);},[session.notes,selectedNote]);
   const activeScale = scales[current - 1];
 
   function pageCanvas(number: number) {
@@ -242,14 +261,16 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
   }, [mode, zoom, size]);
 
   useEffect(()=>{if(selectedShape&&!session.shapes?.some(s=>s.id===selectedShape))setSelectedShape(null);},[session.shapes,selectedShape]);
-  function selectShape(id:string|null){history.invalidate();const s=session.shapes?.find(s=>s.id===id);if(s&&s.page!==current)navigate(s.page);setSelectedShape(s?.id??null);setSelectedId(null);setSelectedKey(null);history.invalidate();setPlacing(false);setTool('edit');}
+  function selectShape(id:string|null){setSelectedNote(null);history.invalidate();const s=session.shapes?.find(s=>s.id===id);if(s&&s.page!==current)navigate(s.page);setSelectedShape(s?.id??null);setSelectedId(null);setSelectedKey(null);history.invalidate();setPlacing(false);setTool('edit');}
 
   function selectStroke(id: string | null) {
+    setSelectedNote(null);
     const stroke = annotations.find(s => s.id === id);
     if (stroke && stroke.page !== current) navigate(stroke.page);
     setSelectedShape(null); setSelectedKey(null); setSelectedId(stroke?.id ?? null);
   }
 
+  function selectNote(id:string,pointer?:string){if(id!==selectedNote||(pointer??null)!==selectedPointer)history.invalidate();const n=session.notes?.find(n=>n.id===id);if(n&&n.page!==current)navigate(n.page);setSelectedNote(id||null);setSelectedPointer(pointer??null);setSelectedShape(null);setSelectedKey(null);setSelectedId(null);setTool('edit');}
   return <div ref={root} className="pdf-navigation">
     <div className="pdf-controls" role="toolbar" aria-label="PDF navigation">
       <div className="control-group" role="group" aria-label="Pages">
@@ -276,21 +297,24 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
         <button disabled={disabled || !history.redoLabel} title={`Redo ${history.redoLabel ?? ''} (Ctrl+Y / Ctrl+Shift+Z)`} aria-keyshortcuts="Control+y Control+Shift+z" onClick={() => traverse('redo')}>Redo</button>
       </div>
       <div className="tool-modes" role="group" aria-label="Annotation mode">
-        <button aria-pressed={tool === 'highlight'} onClick={() => { setPlacing(false); setSelectedKey(null); history.invalidate(); setSelectedShape(null); setTool('highlight'); setSelectedId(null); }}>Highlight</button>
+        <button aria-pressed={tool === 'highlight'} onClick={() => { setPlacing(false); setSelectedKey(null); history.invalidate(); setSelectedShape(null); setTool('highlight'); setSelectedNote(null); setSelectedId(null); }}>Highlight</button>
         <button aria-pressed={tool === 'edit'} onClick={() => {history.invalidate();setPlacing(false);setTool('edit');}}>Select/Edit</button>
       </div>
-      <label className="shape-tool-label">Shape <select aria-label="Shape tool" value={tool==='highlight'||tool==='edit'?'':tool} onChange={e=>{if(!e.target.value)return;history.invalidate();setPlacing(false);setSelectedKey(null);setSelectedId(null);setSelectedShape(null);setTool(e.target.value as ShapeKind);}}><option value="">Draw?</option><option value="rectangle">Rectangle</option><option value="ellipse">Ellipse</option><option value="line">Line</option></select></label>
+      <label className="shape-tool-label">Shape <select aria-label="Shape tool" value={['rectangle','ellipse','line'].includes(tool)?tool:''} onChange={e=>{if(!e.target.value)return;history.invalidate();setPlacing(false);setSelectedKey(null);setSelectedId(null);setSelectedShape(null);setSelectedNote(null);setTool(e.target.value as ShapeKind);}}><option value="">Draw?</option><option value="rectangle">Rectangle</option><option value="ellipse">Ellipse</option><option value="line">Line</option></select></label>
+      <button aria-pressed={tool==='text'} onClick={()=>{history.invalidate();setPlacing(false);setSelectedNote(null);setSelectedShape(null);setSelectedKey(null);setSelectedId(null);setTool('text');}}>Text</button>
+      <button aria-pressed={tool==='arrow'} onClick={()=>{history.invalidate();setPlacing(false);setSelectedNote(null);setSelectedShape(null);setSelectedKey(null);setSelectedId(null);setTool('arrow');}}>Arrow</button>
+      {(tool==='edit'||tool==='text'||tool==='arrow')&&<NoteControls notes={session.notes??[]} selected={selectedNote} pointer={selectedPointer} onSelect={selectNote} editing={editingNote} onEdit={setEditingNote} onClose={()=>setEditingNote(null)} onPointer={()=>{history.invalidate();setPointerPlacement(selectedNote);}} placing={!!pointerPlacement} history={history} dispatch={dispatch} disabled={disabled} revision={`${viewRevision}:${mode}:${zoom}:${tool}`}/>}
       {tool === 'highlight' ? <DrawingControls value={drawing} onChange={(drawing, manual) => dispatch({ type: 'drawing', drawing, manual })} />
-        : tool === 'edit' && !currentShape ? <EditingControls session={session} selectedId={selectedId} onSelect={selectStroke} dispatch={dispatch} /> : null}
-      {tool!=='highlight' && <ShapeControls line={tool==='line'} shapes={session.shapes??[]} selected={selectedShape} onSelect={selectShape} value={currentShape??shapeStyle} onChange={style=>{if(currentShape)dispatch({type:'put-shape',shape:{...currentShape,...style},before:currentShape});else setShapeStyle(style);}} onDelete={currentShape?()=>dispatch({type:'remove-shape',id:currentShape.id}):undefined} />}
+        : tool === 'edit' && !currentShape && !selectedNote ? <EditingControls session={session} selectedId={selectedId} onSelect={selectStroke} dispatch={dispatch} /> : null}
+      {(tool==='edit'&&!selectedNote||['rectangle','ellipse','line'].includes(tool)) && <ShapeControls line={tool==='line'} shapes={session.shapes??[]} selected={selectedShape} onSelect={selectShape} value={currentShape??shapeStyle} onChange={style=>{if(currentShape)dispatch({type:'put-shape',shape:{...currentShape,...style},before:currentShape});else setShapeStyle(style);}} onDelete={currentShape?()=>dispatch({type:'remove-shape',id:currentShape.id}):undefined} />}
       {(tool === 'highlight' || roundingStroke) && <RoundingControl key={`${tool}:${selectedId}:${viewRevision}:${mode}:${zoom}:${disabled}`} value={roundingStroke?.rounding ?? (tool === 'highlight' ? drawing.rounding : undefined) ?? 100} history={history} identity={roundingStroke ?? drawing} onPreview={setRoundingPreview}
         onCommit={(rounding,generation)=>{if(roundingStroke)dispatch({type:'edit-stroke',id:roundingStroke.id,before:roundingStroke,edit:{rounding}},generation);else {const next={...drawing};if(rounding===100)delete next.rounding;else next.rounding=rounding;dispatch({type:'drawing',drawing:next,manual:false},generation);}}} />}
     </div>
     <LegendControls session={session} dispatch={dispatch} />
     <PageLegendControls rows={rows} onRows={setPlacementRows} session={session} selected={selectedKey} pages={pages} current={current} placing={placing}
       history={history} revision={viewRevision} disabled={disabled} dispatch={dispatch}
-      onPlace={()=>{history.invalidate();setPlacing(!placing);setSelectedKey(null);setSelectedId(null);}}
-      onSelect={id=>{const k=session.pageLegends?.find(k=>k.id===id);if(k&&k.page!==current)navigate(k.page);setSelectedShape(null);setSelectedKey(id||null);setSelectedId(null);setTool('edit');}}/>
+      onPlace={()=>{setSelectedNote(null);history.invalidate();setPlacing(!placing);setSelectedKey(null);setSelectedId(null);}}
+      onSelect={id=>{setSelectedNote(null);const k=session.pageLegends?.find(k=>k.id===id);if(k&&k.page!==current)navigate(k.page);setSelectedShape(null);setSelectedKey(id||null);setSelectedId(null);setTool('edit');}}/>
     <div ref={host} {...pan} className={`pdf-scroll ${pan.className}`} tabIndex={0}
       role="region" aria-label="PDF pages" aria-describedby="pan-hint" onScroll={updateCurrent}
       onPointerDown={event => {
@@ -303,14 +327,15 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
             <PdfPage page={page} scale={scales[index]} active={rasterPages.includes(page.pageNumber)}
               pixelBudget={Math.min(16_000_000, 32_000_000 / Math.max(1, rasterPages.length))}>
               <AnnotationOverlay page={page.pageNumber} viewport={viewport} style={drawing} legendId={activeLegendId}
-                history={history} tool={tool==='edit'?'edit':'highlight'} selectedId={selectedId} onSelect={id=>{setSelectedShape(null);setSelectedId(id);setSelectedKey(null);}} onAction={dispatch} legends={session.legends} disabled={disabled||placing||(tool!=='highlight'&&tool!=='edit')} viewRevision={viewRevision}
+                history={history} tool={tool==='edit'?'edit':'highlight'} selectedId={selectedId} onSelect={id=>{setSelectedNote(null);setSelectedShape(null);setSelectedId(id);setSelectedKey(null);}} onAction={dispatch} legends={session.legends} disabled={disabled||!!editingNote||placing||!!pointerPlacement||(tool!=='highlight'&&tool!=='edit')} viewRevision={viewRevision}
                 annotations={annotations.filter(stroke => stroke.page === page.pageNumber).map(s=>s===roundingStroke && roundingPreview!==null ? {...s,rounding:roundingPreview} : s)}
                 onCommit={(stroke, generation) => dispatch({ type: 'commit', stroke }, generation)} />
-              <ShapeOverlay page={page.pageNumber} viewport={viewport} shapes={(session.shapes??[]).filter(s=>s.page===page.pageNumber)} tool={tool} style={{...shapeStyle,fill:tool==='line'?null:shapeStyle.fill}} selected={selectedShape}
-                onSelect={id=>{setSelectedShape(id);setSelectedId(null);setSelectedKey(null);}} dispatch={dispatch} history={history} disabled={disabled||placing} revision={viewRevision}/>
+              <ShapeOverlay page={page.pageNumber} viewport={viewport} shapes={(session.shapes??[]).filter(s=>s.page===page.pageNumber)} tool={tool==='text'||tool==='arrow'?'highlight':tool} style={{...shapeStyle,fill:tool==='line'?null:shapeStyle.fill}} selected={selectedShape}
+                onSelect={id=>{setSelectedNote(null);setSelectedShape(id);setSelectedId(null);setSelectedKey(null);}} dispatch={dispatch} history={history} disabled={disabled||!!editingNote||placing||!!pointerPlacement} revision={viewRevision}/>
+              <NoteOverlay page={page.pageNumber} viewport={viewport} notes={(session.notes??[]).filter(n=>n.page===page.pageNumber)} tool={tool} selected={selectedNote} pointer={selectedPointer} placing={pointerPlacement} onSelect={selectNote} onEdit={n=>{setSelectedNote(n.id);setEditingNote(n);}} onPlaced={()=>setPointerPlacement(null)} dispatch={dispatch} history={history} disabled={disabled||placing||!!editingNote} revision={viewRevision}/>
               <PageLegendOverlay rows={rows} page={page.pageNumber} viewport={viewport} session={session} history={history} placing={placing}
-                onPlaced={()=>setPlacing(false)} selected={selectedKey} onSelect={id=>{setSelectedShape(null);setSelectedKey(id);setSelectedId(null);setTool('edit');}}
-                dispatch={dispatch} editing={tool==='edit'} disabled={disabled} revision={viewRevision}/>
+                onPlaced={()=>setPlacing(false)} selected={selectedKey} onSelect={id=>{setSelectedNote(null);setSelectedShape(null);setSelectedKey(id);setSelectedId(null);setTool('edit');}}
+                dispatch={dispatch} editing={tool==='edit'&&!pointerPlacement} disabled={disabled||!!editingNote||!!pointerPlacement} revision={viewRevision}/>
             </PdfPage>
           </div>;
         })}

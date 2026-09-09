@@ -1,3 +1,4 @@
+import { validNotes, type NoteObject } from './notes';
 import { validShape, MAX_SHAPES, type Shape } from './shapes';
 import { validRounding } from './highlightGeometry';
 import { validPageLegend, legendTextError, textError, type PageLegend } from './pageLegend';
@@ -6,6 +7,7 @@ import { DEFAULT_DRAWING, type DrawingStyle } from '../components/Annotations/Dr
 
 export type Legend = { id: string; name: string; color: string };
 export type AnnotationSession = {
+  notes?: NoteObject[];
   shapes?: Shape[];
   pageLegends?: PageLegend[];
   legends: Legend[];
@@ -25,6 +27,8 @@ export function legendNameError(legends: Legend[], name: string, exceptId?: stri
   return null;
 }
 export type SessionAction =
+  | { type: 'put-note'; note: NoteObject; before?: NoteObject }
+  | { type: 'remove-note'; id: string }
   | { type: 'put-shape'; shape: Shape; before?: Shape }
   | { type: 'remove-shape'; id: string }
   | { type: 'put-key'; key: PageLegend; before?: PageLegend; legends: Legend[] }
@@ -50,10 +54,23 @@ function withPageLegends(state: AnnotationSession, keys: PageLegend[]): Annotati
 }
 
 export function sessionReducer(state: AnnotationSession, action: SessionAction): AnnotationSession {
+  const noteIds=(state.notes??[]).flatMap(n=>[n.id,...(n.type==='text'?n.pointers.map(p=>p.id):[])]);
   switch (action.type) {
+    case 'put-note': {
+      const notes=state.notes??[], n=action.note;
+      if(action.before ? !notes.includes(action.before)||action.before.id!==n.id||action.before.page!==n.page||action.before.type!==n.type : notes.some(v=>v.id===n.id))return state;
+      const next=action.before?notes.map(v=>v===action.before?n:v):[...notes,n];
+      if(!validNotes(next,[...state.legends,...state.annotations,...(state.shapes??[]),...(state.pageLegends??[])].map(v=>v.id)))return state;
+      return {...state,notes:next};
+    }
+    case 'remove-note': {
+      if(!state.notes?.some(n=>n.id===action.id))return state;
+      const notes=state.notes.filter(n=>n.id!==action.id), next={...state};
+      if(notes.length)next.notes=notes;else delete next.notes;return next;
+    }
     case 'put-shape': {
       const shapes=state.shapes??[],s=action.shape;
-      if(!validShape(s)||state.legends.some(l=>l.id===s.id)||state.annotations.some(a=>a.id===s.id)||state.pageLegends?.some(k=>k.id===s.id)
+      if(noteIds.includes(s.id)||!validShape(s)||state.legends.some(l=>l.id===s.id)||state.annotations.some(a=>a.id===s.id)||state.pageLegends?.some(k=>k.id===s.id)
         ||(action.before ? !shapes.includes(action.before)||action.before.id!==s.id||action.before.page!==s.page||action.before.type!==s.type : shapes.length>=MAX_SHAPES||shapes.some(a=>a.id===s.id)))return state;
       return {...state,shapes:action.before ? shapes.map(a=>a===action.before?s:a) : [...shapes,s]};
     }
@@ -64,7 +81,7 @@ export function sessionReducer(state: AnnotationSession, action: SessionAction):
     }
     case 'put-key': {
       const keys = state.pageLegends ?? [];
-      if (action.legends !== state.legends || !validPageLegend(action.key,state.legends) || legendTextError(action.key,state.legends)
+      if (noteIds.includes(action.key.id) || action.legends !== state.legends || !validPageLegend(action.key,state.legends) || legendTextError(action.key,state.legends)
         || state.shapes?.some(s=>s.id===action.key.id) || state.annotations.some(s=>s.id===action.key.id)
         || (action.before ? !keys.includes(action.before) || action.before.id !== action.key.id : keys.some(k=>k.id===action.key.id) || keys.length >= 1000)) return state;
       return {...state,pageLegends:action.before ? keys.map(k=>k===action.before?action.key:k) : [...keys,action.key]};
@@ -108,7 +125,7 @@ export function sessionReducer(state: AnnotationSession, action: SessionAction):
       return { ...state, annotations: state.annotations.map(s => s === action.before ? { ...s, points: action.points } : s) };
     }
     case 'create':
-      if (!action.legend.id || state.shapes?.some(s=>s.id===action.legend.id) || state.pageLegends?.some(k=>k.id===action.legend.id) || !validColor(action.legend.color) || state.legends.some(item => item.id === action.legend.id) || legendNameError(state.legends, action.legend.name)) return state;
+      if (noteIds.includes(action.legend.id) || !action.legend.id || state.shapes?.some(s=>s.id===action.legend.id) || state.pageLegends?.some(k=>k.id===action.legend.id) || !validColor(action.legend.color) || state.legends.some(item => item.id === action.legend.id) || legendNameError(state.legends, action.legend.name)) return state;
       return { ...state, legends: [...state.legends, { ...action.legend, name: action.legend.name.trim() }],
         activeLegendId: action.legend.id, drawing: { ...state.drawing, color: action.legend.color } };
     case 'rename':
@@ -130,7 +147,7 @@ export function sessionReducer(state: AnnotationSession, action: SessionAction):
         && state.legends.find(l => l.id === state.activeLegendId)?.color !== action.drawing.color)) return state;
       return { ...state, drawing: action.drawing, activeLegendId: action.manual ? null : state.activeLegendId };
     case 'commit':
-      if (!action.stroke.id || state.shapes?.some(s=>s.id===action.stroke.id) || state.pageLegends?.some(k=>k.id===action.stroke.id) || state.annotations.some(s => s.id === action.stroke.id) || !validStyle(action.stroke)
+      if (noteIds.includes(action.stroke.id) || !action.stroke.id || state.shapes?.some(s=>s.id===action.stroke.id) || state.pageLegends?.some(k=>k.id===action.stroke.id) || state.annotations.some(s => s.id === action.stroke.id) || !validStyle(action.stroke)
         || action.stroke.type !== 'freehand' || !Number.isInteger(action.stroke.page) || action.stroke.page < 1
         || action.stroke.points.length < 2 || action.stroke.points.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y) || Math.abs(p.x) > 1e9 || Math.abs(p.y) > 1e9)) return state;
       // Resolve against current session state, including deletion during a gesture.

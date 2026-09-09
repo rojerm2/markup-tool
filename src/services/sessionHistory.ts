@@ -3,6 +3,7 @@ import { sessionReducer, type AnnotationSession, type SessionAction } from './an
 export const HISTORY_LIMIT = 100;
 type Transaction = { before: AnnotationSession; after: AnnotationSession; label: string };
 const labels: Record<SessionAction['type'], string> = {
+  'put-note': 'Create/edit note or arrow', 'remove-note': 'Delete note or arrow',
   'put-shape': 'Draw/edit shape', 'remove-shape': 'Delete shape',
   'put-key': 'Place/edit page legend', 'remove-key': 'Delete page legend',
   commit: 'Draw stroke', 'move-stroke': 'Move stroke', 'remove-stroke': 'Delete stroke',
