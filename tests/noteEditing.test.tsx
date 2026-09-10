@@ -46,3 +46,9 @@ it('keeps text keystrokes local, shows glyph errors, cancels drafts and commits 
  fireEvent.change(area,{target:{value:'Caf\u00e9\nGreek'}});fireEvent.keyDown(area,{key:'Escape'});expect(h.present).toBe(emptySession);expect(screen.queryByLabelText('Note text')).toBeNull();
  fireEvent.click(screen.getByText('New draft'));area=screen.getByLabelText('Note text');fireEvent.change(area,{target:{value:'Line one\nLine two'}});expect(h.present).toBe(emptySession);fireEvent.click(screen.getByText('Apply text'));expect(h.present.notes![0]).toMatchObject({text:'Line one\nLine two'});h.traverse('undo');expect(h.present).toBe(emptySession);
 });
+
+it.each(['snapshot','history','blur','scroll'])('cancels an uncommitted editor on %s and keeps editable-field scrolling local',reason=>{
+ const h=new SessionHistory(emptySession);render(<Editor h={h}/>);fireEvent.click(screen.getByText('New draft'));const area=screen.getByLabelText('Note text');fireEvent.change(area,{target:{value:'Draft\nonly'}});fireEvent.scroll(area);expect(screen.getByLabelText('Note text')).toBe(area);
+ act(()=>{if(reason==='snapshot')h.cancelSnapshotDrafts();if(reason==='history')h.traverse('undo');if(reason==='blur'||reason==='scroll')fireEvent(window,new Event(reason));});
+ expect(screen.queryByLabelText('Note text')).toBeNull();expect(h.present).toBe(emptySession);expect(h.undoLabel).toBeUndefined();
+});

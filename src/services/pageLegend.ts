@@ -60,7 +60,7 @@ export function layoutLegend(k: PageLegend, legends: Legend[]) {
   return {texts,chips,chip,height:y-6+pad};
 }
 // Local key coordinates run right/down; this matrix maps them to raw PDF space.
-export function keyMatrix(k: PageLegend): [number,number,number,number,number,number] {
+export function keyMatrix(k: Pick<PageLegend, 'x'|'y'|'rotation'>): [number,number,number,number,number,number] {
   const axes = {0:[1,0,0,-1],90:[0,1,1,0],180:[-1,0,0,1],270:[0,-1,-1,0]}[k.rotation];
   return [...axes,k.x,k.y] as [number,number,number,number,number,number];
 }

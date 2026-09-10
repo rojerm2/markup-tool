@@ -9,8 +9,8 @@ export type TextNote = { id: string; type: 'text'; page: number; x: number; y: n
   width: number; height: number; fontSize: number; color: string; background: boolean; border: boolean; text: string; pointers: NotePointer[] };
 export type Arrow = ArrowStyle & { id: string; type: 'arrow'; page: number; a: Point; b: Point };
 export type NoteObject = TextNote | Arrow;
-export const ARROW_DEFAULTS: ArrowStyle = { color: '#6b7280', width: 2, head: 10 };
-export const TEXT_DEFAULTS = { width: 200, height: 60, fontSize: 12, color: '#6b7280', background: true, border: true, pointers: [] };
+export const ARROW_DEFAULTS: ArrowStyle = { color: '#a87951', width: 2, head: 10 };
+export const TEXT_DEFAULTS = { width: 200, height: 60, fontSize: 12, color: '#a87951', background: true, border: true, pointers: [] };
 export const MAX_NOTES = 10000;
 export const MAX_POINTERS = 32;
 export const MAX_TOTAL_TEXT = 1000000;
@@ -39,7 +39,7 @@ export function layoutNote(n: Pick<TextNote, 'text'|'width'|'fontSize'>) {
   return { lines, height: 16 + lines.length*n.fontSize*1.4 };
 }
 export const fitNote = (n: TextNote): TextNote => ({...n,height:Math.max(n.height,layoutNote(n).height)});
-export function noteMatrix(n: TextNote) { return keyMatrix(n as unknown as Parameters<typeof keyMatrix>[0]); }
+export function noteMatrix(n: TextNote) { return keyMatrix(n); }
 export function notePoint(n: TextNote, x: number, y: number): Point {
   const [a,b,c,d,e,f]=noteMatrix(n); return {x:a*x+c*y+e,y:b*x+d*y+f};
 }
@@ -67,8 +67,8 @@ const color = (v: string) => typeof v==='string' && /^#[0-9a-f]{6}$/.test(v);
 const style = (v: ArrowStyle) => color(v.color)&&Number.isFinite(v.width)&&v.width>=.25&&v.width<=20&&Number.isFinite(v.head)&&v.head>=0&&v.head<=100;
 export function validNote(n: NoteObject, pages=10000): boolean {
   if (!n||!id(n.id)||!Number.isInteger(n.page)||n.page<1||n.page>pages) return false;
-  if(n.type==='arrow') return point(n.a)&&point(n.b)&&style(n)&&Math.hypot(n.a.x-n.b.x,n.a.y-n.b.y)>=.01&&Math.hypot(n.a.x-n.b.x,n.a.y-n.b.y)<=1e6;
-  return n.type==='text'&&point(n)&&[0,90,180,270].includes(n.rotation)&&color(n.color)
+  if(n.type==='arrow') return Object.keys(n).every(k=>['id','type','page','a','b','color','width','head'].includes(k))&&point(n.a)&&point(n.b)&&style(n)&&Math.hypot(n.a.x-n.b.x,n.a.y-n.b.y)>=.01&&Math.hypot(n.a.x-n.b.x,n.a.y-n.b.y)<=1e6;
+  return n.type==='text'&&Object.keys(n).every(k=>['id','type','page','x','y','rotation','width','height','fontSize','color','background','border','text','pointers'].includes(k))&&point(n)&&[0,90,180,270].includes(n.rotation)&&color(n.color)
     &&Number.isFinite(n.width)&&n.width>=40&&n.width<=2000&&Number.isFinite(n.height)&&n.height>=30&&n.height<=10000
     &&[10,12,16,20].includes(n.fontSize)&&typeof n.background==='boolean'&&typeof n.border==='boolean'
     &&typeof n.text==='string'&&!!n.text.trim()&&!noteTextError(n.text)&&layoutNote(n).height<=n.height+1e-7

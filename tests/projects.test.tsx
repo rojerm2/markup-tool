@@ -1,3 +1,4 @@
+import { TEXT_DEFAULTS, ARROW_DEFAULTS, type TextNote } from '../src/services/notes';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { PDFPageProxy } from 'pdfjs-dist';
@@ -311,4 +312,18 @@ it('export during unfinished move/draw cancels previews and captures only commit
   expect(vi.mocked(exports.exportPdf).mock.calls[1][3].annotations).toEqual(original.session.annotations);
   expect(status()).not.toContain('Unsaved changes');
   expect(screen.getByLabelText('Highlights for page 1').querySelectorAll('[data-annotation-id]')).toHaveLength(2);
+});
+
+it('reopens offscreen notes, preserves fixed targets on nudge, excludes text drafts from save and retains work after malformed M14 load',async()=>{
+ render(<App/>);await openPdf();
+ const note:TextNote={...TEXT_DEFAULTS,id:'note',type:'text',page:2,x:50,y:700,rotation:0,text:'Saved note',pointers:[{...ARROW_DEFAULTS,id:'pointer',target:{x:200,y:300}}]};
+ const project={format:'pdf-markup-project' as const,version:2 as const,source,session:{...emptySession,notes:[note]}};
+ vi.mocked(files.readProject).mockResolvedValue({path:'C:\\plans\\notes.pmarkup',project});vi.mocked(files.resolveSource).mockResolvedValue(source.reference);click('Open Project');await idle();
+ click('Select/Edit');fireEvent.change(screen.getByLabelText('Selected note or arrow'),{target:{value:'note'}});expect((screen.getByLabelText('Page number') as HTMLInputElement).value).toBe('2');
+ fireEvent.keyDown(screen.getByRole('region',{name:'PDF pages'}),{key:'ArrowRight'});click('Save Project');await idle();
+ let saved=parseProject(vi.mocked(files.writeProject).mock.calls.at(-1)![2]);expect(saved.session.notes![0]).toMatchObject({x:52,pointers:note.pointers});
+ click('Note / arrow properties');click('Edit text');fireEvent.change(screen.getByLabelText('Note text'),{target:{value:'Uncommitted replacement'}});click('Save Project');await idle();
+ saved=parseProject(vi.mocked(files.writeProject).mock.calls.at(-1)![2]);expect((saved.session.notes![0] as TextNote).text).toBe('Saved note');expect(screen.queryByLabelText('Note text')).toBeNull();
+ vi.mocked(files.readProject).mockImplementationOnce(async()=>{parseProject(JSON.stringify({...project,session:{...project.session,notes:[{...note,pointers:[{...note.pointers[0],page:1}]}]}}));throw new Error('should not reach');});click('Open Project');await idle();expect(screen.getByRole('alert').textContent).toContain('Invalid project');
+ expect(screen.getByLabelText('Selected note or arrow').textContent).toContain('Saved note');click('Save Project');await idle();expect(parseProject(vi.mocked(files.writeProject).mock.calls.at(-1)![2]).session.notes).toEqual(saved.session.notes);
 });

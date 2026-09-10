@@ -141,7 +141,7 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
     setRasterPages(previous => previous.join(',') === nearby.join(',') ? previous : nearby);
   }
   useLayoutEffect(updateRasterPages, [mode, zoom, size, current, pages]);
-  useEffect(()=>{const cancel=(e?:Event)=>{if(e?.type==='scroll'&&e.target instanceof Element&&e.target.closest('.note-properties'))return;setPointerPlacement(null);setEditingNote(null);};const a=history.subscribeCancellation(cancel),b=history.subscribeSnapshotCancellation(cancel);window.addEventListener('blur',cancel);window.addEventListener('scroll',cancel,true);return()=>{a();b();window.removeEventListener('blur',cancel);window.removeEventListener('scroll',cancel,true);};},[history]);
+  useEffect(()=>{const cancel=(e?:Event)=>{if(e?.type==='scroll'&&e.target instanceof Element&&e.target.closest('.note-properties'))return;setPointerPlacement(null);setEditingNote(null);};const a=history.subscribeCancellation(cancel),b=history.subscribeSnapshotCancellation(cancel);document.addEventListener('visibilitychange',cancel);window.addEventListener('blur',cancel);window.addEventListener('scroll',cancel,true);return()=>{a();b();document.removeEventListener('visibilitychange',cancel);window.removeEventListener('blur',cancel);window.removeEventListener('scroll',cancel,true);};},[history]);
   useEffect(()=>{setPointerPlacement(null);setEditingNote(null);},[tool,viewRevision,mode,zoom,disabled]);
   useEffect(()=>{if(selectedNote&&!session.notes?.some(n=>n.id===selectedNote))setSelectedNote(null);},[session.notes,selectedNote]);
   const activeScale = scales[current - 1];

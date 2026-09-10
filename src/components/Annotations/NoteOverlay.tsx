@@ -21,14 +21,14 @@ export default function NoteOverlay({page,viewport,notes,tool,selected,pointer,p
   useEffect(()=>{cancel();},[tool,placing,disabled,revision,viewport.width,viewport.height,...(viewport.transform??[])]);
   useEffect(()=>{if(gesture.current?.before&&!notes.includes(gesture.current.before))cancel();},[notes]);
   useEffect(()=>{const key=(e:KeyboardEvent)=>{if(e.key==='Escape'||e.code==='Space'&&!isEditingControl(e.target))cancel();};
-    window.addEventListener('keydown',key);window.addEventListener('blur',cancel);window.addEventListener('scroll',cancel,true);
-    return()=>{cancel();window.removeEventListener('keydown',key);window.removeEventListener('blur',cancel);window.removeEventListener('scroll',cancel,true);};},[]);
+    document.addEventListener('visibilitychange',cancel);window.addEventListener('keydown',key);window.addEventListener('blur',cancel);window.addEventListener('scroll',cancel,true);
+    return()=>{cancel();document.removeEventListener('visibilitychange',cancel);window.removeEventListener('keydown',key);window.removeEventListener('blur',cancel);window.removeEventListener('scroll',cancel,true);};},[]);
   function update(client:Point,shift:boolean,force=false){
     const g=gesture.current;if(!g||!svg.current)return;
     g.last=client;
     if(!force&&!g.changed&&Math.hypot(client.x-g.client.x,client.y-g.client.y)<4)return;
     const rect=svg.current.getBoundingClientRect(),end=clientToPdf(client,rect,viewport),n=g.before??g.value;
-    if(placing&&n.type==='text')return;
+    if((placing||!g.before)&&n.type==='text')return;
     if(!g.before&&n.type==='arrow')g.value={...n,b:constrainedPoint(g.start,end,'line',shift,rect,viewport)};
     else if(g.handle&&n.type==='arrow')g.value={...n,[g.handle]:constrainedPoint(g.handle==='a'?n.b:n.a,end,'line',shift,rect,viewport)};
     else if(g.handle==='resize'&&n.type==='text'){const p=noteLocal(n,end);g.value=fitNote({...n,width:Math.max(40,Math.min(2000,p.x)),height:Math.max(30,Math.min(10000,p.y))});}
@@ -54,7 +54,7 @@ export default function NoteOverlay({page,viewport,notes,tool,selected,pointer,p
       const target=clientToPdf(g.last,svg.current!.getBoundingClientRect(),viewport);
       dispatch({type:'put-note',before:g.before,note:{...g.before,pointers:[...g.before.pointers,{...ARROW_DEFAULTS,id:crypto.randomUUID(),target}]}},g.generation);onPlaced();
     }else if(!g.before&&g.value.type==='text')onEdit(g.value);
-    else if(g.changed&&validNote(g.value)){dispatch({type:'put-note',note:g.value,before:g.before},g.generation);onSelect(g.value.id);}
+    else if(g.changed&&validNote(g.value)){dispatch({type:'put-note',note:g.value,before:g.before},g.generation);onSelect(g.value.id,g.value.type==='text'&&g.handle&&g.handle!=='resize'?g.handle:undefined);}
   }
   const displayed=notes.map(n=>gesture.current?.before===n&&preview?preview:n);
   if(preview&&!gesture.current?.before)displayed.push(preview);
@@ -66,6 +66,7 @@ export default function NoteOverlay({page,viewport,notes,tool,selected,pointer,p
     onPointerUp={e=>{if(gesture.current?.id===e.pointerId){gesture.current.last={x:e.clientX,y:e.clientY};if(!placing)update(gesture.current.last,e.shiftKey);finish();}}} onPointerCancel={cancel} onLostPointerCapture={cancel}
     onDoubleClick={e=>{const found=notes.find(n=>n.id===(e.target as Element).closest('[data-note-id]')?.getAttribute('data-note-id'));if(!disabled&&tool==='edit'&&found?.type==='text')onEdit(found);}}>
     {displayed.map(n=><NoteGraphic key={n.id} note={n} viewport={viewport} editing={tool==='edit'&&!disabled&&!placing}/>)}
+    {n?.type==='text'&&<polygon data-note-selection="true" points={[[0,0],[n.width,0],[n.width,n.height],[0,n.height]].map(([x,y])=>{const p=pdfToViewport(notePoint(n,x,y),viewport);return `${p.x},${p.y}`;}).join(' ')} fill="none" stroke="#2563eb" strokeWidth={1.5} strokeDasharray="4 3" pointerEvents="none"/>}
     {n&&handles.map(h=>{const p=pdfToViewport(h.p,viewport);return <rect key={h.key} data-note-id={n.id} data-note-handle={h.key} aria-label={h.label} role="button" tabIndex={disabled?-1:0}
       x={p.x-8} y={p.y-8} width={16} height={16} fill={pointer===h.key?'#bfdbfe':'white'} stroke="#2563eb" strokeWidth={2} style={{pointerEvents:disabled?'none':'all',cursor:'crosshair'}}
       onBlur={()=>{if(gesture.current?.id===-1)cancel();}}
