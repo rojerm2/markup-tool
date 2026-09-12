@@ -1,4 +1,5 @@
 import './App.css';
+import { readLargerControls, writeLargerControls } from './services/uiPreferences';
 import { useEffect, useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -25,6 +26,7 @@ function DirtyDialog({ answer }: { answer: (choice: Choice) => void }) {
   </dialog>;
 }
 export default function App() {
+  const [largerControls, setLargerControls] = useState(readLargerControls);
   const [work, setWork] = useState<Work | null>(null);
   const live = useRef<Work | null>(null), counter = useRef(0), locked = useRef(false), alive = useRef(true);
   const staging = useRef<AbortController | null>(null);
@@ -126,7 +128,7 @@ export default function App() {
     return () => { disposed = true; alive.current = false; unlisten?.(); window.removeEventListener('beforeunload', beforeUnload);
       staging.current?.abort(); live.current?.controller.abort(); pending.current?.('cancel'); pending.current = null; };
   }, []);
-  return <main className="app-shell">
+  return <main className={`app-shell${largerControls ? ' larger-controls' : ''}`}>
     <header className="app-header"><h1>PDF Floor Plan Markup</h1>
       <div className="project-actions" role="toolbar" aria-label="Project files">
         <button disabled={!!operation} onClick={() => void openWork(false)}>Open PDF</button>
@@ -134,12 +136,13 @@ export default function App() {
         <button disabled={!work || !!operation} onClick={() => void run('saving', async () => { await saveCurrent(); })}>Save Project</button>
         <button disabled={!work || !!operation} onClick={() => void run('saving', async () => { await saveCurrent(true); })}>Save As</button>
         <button disabled={!work || !!operation} onClick={() => void exportCurrent()}>Export Annotated PDF</button>
-      </div></header>
+      </div><label className="size-preference"><input type="checkbox" checked={largerControls} onChange={e => { setLargerControls(e.target.checked); writeLargerControls(e.target.checked); }} />Larger controls</label></header>
+    <p className="file-guidance">Save Project keeps your work editable. Export PDF creates a copy to share or print.</p>
     <p className="document-name" role="status">{work ? `${work.projectPath?.split(/[\\/]/).pop() ?? 'Unsaved project'} · PDF: ${work.source.filename} · ${dirty(work) ? 'Unsaved changes' : work.projectPath ? 'Saved' : 'Ready to save'}` : 'Open a PDF or an editable project.'}{operation && ` · ${operation === 'exporting' ? 'Exporting...' : operation === 'saving' ? 'Saving…' : operation === 'opening' ? 'Opening…' : 'Closing…'}`}{!operation && notice && ` | ${notice}`}</p>
     {error && <p role="alert" className="project-error">{error}</p>}
     {operation && notice && <p role="status" className="document-name">{notice}</p>}
     <div className="project-workspace" inert={operation === 'opening' || operation === 'closing'}>
-      {work ? <PdfNavigationView key={work.id} pages={work.pages} session={work.session} history={work.history} onHistory={traverse} onAction={(action, generation) => mutate(action, generation, work.id)} disabled={operation === 'opening' || operation === 'closing'} /> : <p className="empty-document">No PDF selected.</p>}
+      {work ? <PdfNavigationView largerControls={largerControls} key={work.id} pages={work.pages} session={work.session} history={work.history} onHistory={traverse} onAction={(action, generation) => mutate(action, generation, work.id)} disabled={operation === 'opening' || operation === 'closing'} /> : <p className="empty-document">No PDF selected.</p>}
     </div>
     {question && <DirtyDialog answer={answer} />}
   </main>;

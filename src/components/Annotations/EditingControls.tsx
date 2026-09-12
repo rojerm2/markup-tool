@@ -13,7 +13,7 @@ export default function EditingControls({ session, selectedId, onSelect, dispatc
       <option value="">None — click a stroke</option>
       {session.annotations.map((s, i) => <option key={s.id} value={s.id}>Page {s.page} · Stroke {i+1}</option>)}
     </select></label>
-    <label>Legend <select aria-label="Selected stroke legend" disabled={!stroke} value={stroke?.legendId ?? ''} onChange={e => edit({ legendId: e.target.value || null })}>
+    {stroke && <><label>Legend <select aria-label="Selected stroke legend" value={stroke.legendId ?? ''} onChange={e => edit({ legendId: e.target.value || null })}>
       <option value="">Unassigned</option>
       {session.legends.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
     </select></label>
@@ -23,6 +23,7 @@ export default function EditingControls({ session, selectedId, onSelect, dispatc
     </select></label>
     {COLORS.map(c => <button key={c.value} className="color-swatch" disabled={!stroke} aria-label={`Selected stroke ${c.name}`} aria-pressed={stroke?.color === c.value}
       onClick={() => edit({ color: c.value })}><span style={{ background: c.value }}>{stroke?.color === c.value ? '✓' : ''}</span>{c.name}</button>)}
+    </>}
     <button disabled={!stroke} onClick={() => stroke && dispatch({ type: 'remove-stroke', id: stroke.id })}>Delete stroke</button>
   </div>;
 }

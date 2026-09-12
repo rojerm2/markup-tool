@@ -327,3 +327,15 @@ it('reopens offscreen notes, preserves fixed targets on nudge, excludes text dra
  vi.mocked(files.readProject).mockImplementationOnce(async()=>{parseProject(JSON.stringify({...project,session:{...project.session,notes:[{...note,pointers:[{...note.pointers[0],page:1}]}]}}));throw new Error('should not reach');});click('Open Project');await idle();expect(screen.getByRole('alert').textContent).toContain('Invalid project');
  expect(screen.getByLabelText('Selected note or arrow').textContent).toContain('Saved note');click('Save Project');await idle();expect(parseProject(vi.mocked(files.writeProject).mock.calls.at(-1)![2]).session.notes).toEqual(saved.session.notes);
 });
+
+it('persists Larger controls locally without changing saved data, dirty state or undo',async()=>{
+  localStorage.clear(); const view=render(<App/>);await openPdf();
+  click('Save Project');await idle();const before=vi.mocked(files.writeProject).mock.calls.at(-1)![2];
+  fireEvent.click(screen.getByLabelText('Larger controls'));
+  expect(localStorage.getItem('pdf-markup.larger-controls')).toBe('true');
+  expect(status()).not.toContain('Unsaved changes');
+  expect(screen.getByRole('button',{name:'Undo',exact:true}).hasAttribute('disabled')).toBe(true);
+  click('Save Project');await idle();expect(vi.mocked(files.writeProject).mock.calls.at(-1)![2]).toBe(before);
+  view.unmount();render(<App/>);expect((screen.getByLabelText('Larger controls') as HTMLInputElement).checked).toBe(true);
+  localStorage.clear();
+});

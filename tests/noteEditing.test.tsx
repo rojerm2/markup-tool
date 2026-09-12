@@ -52,3 +52,17 @@ it.each(['snapshot','history','blur','scroll'])('cancels an uncommitted editor o
  act(()=>{if(reason==='snapshot')h.cancelSnapshotDrafts();if(reason==='history')h.traverse('undo');if(reason==='blur'||reason==='scroll')fireEvent(window,new Event(reason));});
  expect(screen.queryByLabelText('Note text')).toBeNull();expect(h.present).toBe(emptySession);expect(h.undoLabel).toBeUndefined();
 });
+
+it('labels White and Transparent backgrounds, preserves independent Border and keeps sidebar scrolling local',()=>{
+ const h=new SessionHistory(emptySession);render(<div className="workspace-panel" data-testid="panel"><Editor h={h}/></div>);
+ fireEvent.click(screen.getByText('New draft'));
+ expect((screen.getByLabelText('Note background') as HTMLSelectElement).value).toBe('white');
+ expect((screen.getByLabelText('Border') as HTMLInputElement).checked).toBe(true);
+ fireEvent.change(screen.getByLabelText('Note text'),{target:{value:'Transparent label'}});
+ fireEvent.change(screen.getByLabelText('Note background'),{target:{value:'transparent'}});
+ fireEvent.scroll(screen.getByTestId('panel'));
+ expect((screen.getByLabelText('Note text') as HTMLTextAreaElement).value).toBe('Transparent label');
+ fireEvent.click(screen.getByText('Apply text'));
+ expect(h.present.notes![0]).toMatchObject({background:false,border:true});
+ h.traverse('undo');expect(h.present).toBe(emptySession);
+});

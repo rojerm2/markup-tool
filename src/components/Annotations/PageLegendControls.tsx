@@ -44,9 +44,9 @@ export default function PageLegendControls({rows,onRows,session,selected,onSelec
         <label>Layout <select aria-label="Legend layout" value={value.layout} onChange={e=>edit({layout:e.target.value as PageLegend['layout']})}><option value="list">List</option><option value="columns">Compact two-column</option></select></label>
         <label>Text size <select aria-label="Legend text size" value={value.fontSize} onChange={e=>edit({fontSize:Number(e.target.value)})}>{[10,12,16].map(n=><option key={n} value={n}>{n===10?'Small':n===12?'Regular':'Large'}</option>)}</select></label>
         <label>Width <input aria-label="Legend width" type="number" min={100} max={2000} step={20} value={value.width} onChange={e=>edit({width:Number(e.target.value)})}/></label>
-        <details><summary>Rows and more options</summary>
-          <label><input type="checkbox" checked={value.background} onChange={e=>edit({background:e.target.checked})}/> White background</label>
+          <label>Background<select aria-label="Legend background" value={value.background?'white':'transparent'} onChange={e=>edit({background:e.target.value==='white'})}><option value="white">White</option><option value="transparent">Transparent</option></select></label>
           <label><input type="checkbox" checked={value.border} onChange={e=>edit({border:e.target.checked})}/> Border</label>
+        <details><summary>Rows and more options</summary>
           <p>Blank heading hides the title. Colors are full opacity; highlights are translucent.</p>
           {value.categoryIds.map((id,i)=><div key={id} className="key-row"><span>{session.legends.find(l=>l.id===id)?.name}</span>
             <button type="button" disabled={i===0} aria-label={`Move row ${i+1} up`} onClick={()=>{const ids=[...value.categoryIds];[ids[i-1],ids[i]]=[ids[i],ids[i-1]];edit({categoryIds:ids});}}>Up</button>

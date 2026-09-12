@@ -51,3 +51,13 @@ it('commits a whole move once and excludes property drafts from snapshots until 
   expect(h.present.pageLegends![0].title).toBe('New title');expect(snapshot.pageLegends![0].title).toBe('LEGEND');
   h.traverse('undo');expect(h.present).toBe(snapshot);h.traverse('undo');expect(h.present.pageLegends![0]).toBe(key);
 });
+
+it('changes the explicitly named key background independently of Border with Apply and undo',()=>{
+ const h=new SessionHistory({...emptySession,legends,pageLegends:[key]});render(<Harness history={h}/>);
+ expect((screen.getByLabelText('Legend background') as HTMLSelectElement).value).toBe('white');
+ fireEvent.change(screen.getByLabelText('Legend background'),{target:{value:'transparent'}});
+ expect(h.present.pageLegends![0]).toBe(key);
+ fireEvent.click(screen.getByText('Apply legend changes'));
+ expect(h.present.pageLegends![0]).toMatchObject({background:false,border:true});
+ h.traverse('undo');expect(h.present.pageLegends![0]).toBe(key);
+});

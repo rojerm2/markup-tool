@@ -106,27 +106,6 @@ dialog h2 { font-weight: 650; } dialog p { margin: 10px 0 16px; }
 .page-key-controls [role=alert] { color: #9d341a; padding: 3px 12px; }
 @media(max-width:700px) { .key-properties-body { height: 24vh; } .key-preview { display: none; } .drawing-controls { flex-wrap: nowrap; } .drawing-controls .control-group { flex-wrap: nowrap; } }
 
-@media(max-width:700px) { .pdf-navigation:has(.key-properties) > .annotation-tools, .pdf-navigation:has(.key-properties) > .legend-controls { display:none; } .key-properties-body { height: 24vh; } }
-
-.placement-rows { padding: 0 12px; font-size: 12px; } .placement-rows > div { max-height: 100px; overflow:auto; } .placement-rows label { display:inline-flex; align-items:center; gap:5px; margin-right:12px; }
-@media(max-width:700px) {
-  .pdf-navigation { position:relative; }
-  .pdf-navigation:has(.key-properties) > .pdf-scroll { margin-right:min(260px,60vw); }
-  .key-properties { position:absolute; z-index:2; right:0; top:126px; bottom:30px; width:min(260px,60vw); padding:0 8px; background:#f6f5f2; border-left:1px solid #ccc; }
-  .key-properties > summary { font-size:12px; }
-  .key-properties-body { height:calc(100% - 46px); display:block; }
-  .key-properties form { min-width:0; }
-  .key-properties label { display:flex; flex-wrap:wrap; }
-  .key-properties input:not([type]) { max-width:100%; }
-  .key-actions { margin-top:12px; }
-  .key-preview { display:block; margin-top:10px; }
-}
-@media(max-width:550px) { .key-properties { top:90px; } }
-@media(max-width:700px) { .key-properties { height:calc(100% - 156px); overflow:hidden; } }
-@media(max-width:550px) { .key-properties { height:calc(100% - 120px); } }
-@media(max-width:700px) { .key-properties { overflow:auto; } .key-properties-body { height:auto; } }
-@media(max-width:550px) { .key-properties { bottom:46px; height:calc(100% - 136px); } }
-
 .rounding-control { flex-shrink:0; padding:6px; }
 .rounding-control summary { cursor:pointer; white-space:nowrap; }
 .rounding-popover { position:fixed; z-index:5; right:12px; top:140px; width:min(290px,calc(100vw - 24px)); max-height:calc(100% - 180px); overflow:auto; padding:12px; background:#fff; border:1px solid #94a3b8; border-radius:8px; box-shadow:0 4px 16px #0003; white-space:normal; }
@@ -161,3 +140,77 @@ dialog h2 { font-weight: 650; } dialog p { margin: 10px 0 16px; }
 .note-properties textarea { width:100%; min-height:90px; padding:8px; font:16px LegendSans,sans-serif; border:1px solid #94a3b8; }
 .note-properties button,.note-properties select,.note-properties input { min-height:32px; }
 .note-properties input[type=number] { width:90px; }
+
+/* One scrolling properties surface; PDF geometry is independent of control sizing. */
+:root { font-size:16px; color:#293633; background:#f3f3ef; }
+*, *::before, *::after { box-sizing:border-box; }
+button, input, select, textarea, summary { font:inherit; }
+button, select, input:not([type=checkbox]):not([type=range]), summary { min-height:44px; }
+select { border:1px solid #bac4bf; border-radius:6px; background:white; padding:6px; color:inherit; }
+button { white-space:normal; }
+button:disabled { opacity:1; color:#737c78; background:#eee; border-color:#d5d9d6; }
+button[aria-pressed=true] { background:#dcebe5; border-color:#517c6c; color:#1f4d3d; }
+:focus-visible { outline:3px solid #316caa; outline-offset:2px; }
+.app-header { flex-wrap:wrap; padding:8px 12px; gap:6px 16px; }
+.app-header h1 { font-size:16px; margin:0; }
+.app-header .project-actions { flex-wrap:wrap; overflow:visible; }
+.size-preference { display:flex; align-items:center; gap:8px; min-height:44px; }
+.size-preference input, input[type=checkbox] { width:20px; height:20px; flex-shrink:0; }
+.file-guidance, .document-name { margin:0; padding:3px 12px; font-size:13px; }
+.project-workspace { min-width:0; }
+.pdf-controls { padding:6px 12px; flex-shrink:0; }
+.workspace-bar { display:flex; align-items:center; gap:8px; padding:6px 12px; border-bottom:1px solid #cbd3ce; background:#fff; flex-shrink:0; }
+.workspace-bar > span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.workspace-body { display:flex; flex:1; min-height:0; min-width:0; position:relative; }
+.workspace-panel { width:340px; flex-shrink:0; overflow:auto; padding:10px; border-right:1px solid #cbd3ce; background:#f8f8f5; }
+.workspace-panel[hidden] { display:none; }
+.panel-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
+.workspace-panel .annotation-tools { display:flex; flex-wrap:wrap; overflow:visible; gap:8px; border:0; }
+.workspace-panel .tool-modes, .workspace-panel .editing-controls, .workspace-panel .note-controls, .workspace-panel .shape-controls { flex-wrap:wrap; white-space:normal; padding:0; max-width:100%; }
+.workspace-panel .drawing-controls, .workspace-panel .control-group { flex-wrap:wrap; padding:0; }
+.workspace-panel > *, .workspace-panel .annotation-tools > * { min-width:0; max-width:100%; }
+.workspace-panel .drawing-controls, .workspace-panel .control-group { width:100%; min-width:0; max-width:100%; }
+.workspace-panel .drawing-controls { gap:12px; margin:8px 0; }
+.workspace-panel .tool-status { display:block; }
+.workspace-panel .control-label { width:100%; font-size:inherit; }
+.workspace-panel .color-swatch { min-height:44px; }
+.workspace-panel .color-swatch span { flex-shrink:0; }
+.workspace-panel .legend-controls, .workspace-panel .page-key-controls { margin-top:14px; padding-top:8px; background:transparent; border-top:1px solid #ccd3cf; border-bottom:0; }
+.workspace-panel .legend-bar, .workspace-panel .page-key-bar { padding:0; flex-wrap:wrap; white-space:normal; overflow:visible; }
+.workspace-panel .legend-active, .workspace-panel .legend-form label, .workspace-panel .legend-note { font-size:inherit; max-height:none; }
+.workspace-panel .legend-editor { max-height:none; padding:8px 0; overflow:visible; }
+.workspace-panel .legend-row { flex-wrap:wrap; }
+.workspace-panel label { max-width:100%; }
+.workspace-panel input:not([type=checkbox]):not([type=range]), .workspace-panel select { max-width:100%; }
+.workspace-panel .key-properties { position:static; width:auto; height:auto; max-height:none; padding:0; overflow:visible; border:0; }
+.workspace-panel .key-properties-body { display:block; height:auto; padding:6px 0; overflow:visible; }
+.workspace-panel .key-properties form { min-width:0; }
+.workspace-panel .key-properties label { display:flex; flex-wrap:wrap; }
+.workspace-panel .key-row { flex-wrap:wrap; }
+.workspace-panel .key-row span { min-width:100%; }
+.workspace-panel .key-preview { display:block; margin:10px 0; }
+.workspace-panel .note-properties, .workspace-panel .rounding-popover { position:static; width:100%; max-width:100%; max-height:none; padding:10px; margin-top:8px; box-shadow:none; font-size:inherit; }
+.workspace-panel .note-controls { width:100%; }
+.workspace-panel .note-properties textarea { min-height:120px; }
+.workspace-panel .note-properties button, .workspace-panel .note-properties input, .workspace-panel .note-properties select { min-height:44px; }
+.workspace-panel .placement-rows { padding:8px 0; }
+.workspace-panel .placement-rows > div { max-height:none; }
+#pan-hint { font-size:13px; padding:4px 12px; }
+.larger-controls { font-size:18px; }
+.larger-controls button, .larger-controls select, .larger-controls summary, .larger-controls input:not([type=checkbox]):not([type=range]) { min-height:50px; }
+.larger-controls .workspace-panel { width:370px; }
+@media(max-width:800px) {
+  .app-header h1 { display:none; }
+  .app-header { padding:6px 8px; }
+  .project-actions { gap:4px; }
+  .project-actions button { padding:5px 8px; }
+  .file-guidance { display:none; }
+  .size-preference { min-height:32px; }
+  .pdf-controls { flex-wrap:nowrap; overflow:auto; padding:4px 8px; }
+  .pdf-controls .control-group { flex-wrap:nowrap; flex-shrink:0; }
+  .pdf-controls button { white-space:nowrap; }
+  .workspace-bar { padding:4px 8px; }
+  .workspace-panel, .larger-controls .workspace-panel { position:absolute; left:0; top:0; bottom:0; z-index:40; width:min(340px,calc(100% - 48px)); box-shadow:3px 0 8px #0002; }
+  .workspace-bar > span { font-size:13px; }
+  #pan-hint { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+}

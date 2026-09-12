@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent, type RefObject } from "react";
 import { isEditingControl as isControl } from '../../services/annotationEditing';
 
-export function useSpacePan(host: RefObject<HTMLDivElement | null>) {
+export function useSpacePan(host: RefObject<HTMLDivElement | null>, hand = false, revision: string | number = 0, disabled = false) {
   const [space, setSpace] = useState(false);
   const [dragging, setDragging] = useState(false);
   const held = useRef(false);
@@ -14,9 +14,13 @@ export function useSpacePan(host: RefObject<HTMLDivElement | null>) {
     if (id !== undefined && host.current?.hasPointerCapture(id)) host.current.releasePointerCapture(id);
   }
 
+  useEffect(() => { held.current = false; setSpace(false); stop(); }, [hand, revision, disabled]);
+
   useEffect(() => {
     const reset = () => { held.current = false; setSpace(false); stop(); };
     const down = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { reset(); return; }
+      if (event.target instanceof Element && event.target.closest('button, summary, a, [role="button"]')) return;
       if (event.code !== "Space" || isControl(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
       event.preventDefault();
       held.current = true;
@@ -39,10 +43,10 @@ export function useSpacePan(host: RefObject<HTMLDivElement | null>) {
   }, [host]);
 
   return {
-    className: dragging ? "is-panning" : space ? "can-pan" : "",
+    className: dragging ? "is-panning" : (space || hand) ? "can-pan" : "",
     // Capture phase reserves the gesture before a future annotation layer sees it.
     onPointerDownCapture(event: PointerEvent<HTMLDivElement>) {
-      if (!held.current || event.button !== 0 || drag.current || isControl(event.target)) return;
+      if (disabled || (!held.current && !hand) || event.button !== 0 || drag.current || isControl(event.target)) return;
       event.preventDefault(); event.stopPropagation();
       const element = event.currentTarget;
       element.setPointerCapture(event.pointerId);

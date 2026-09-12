@@ -139,12 +139,15 @@ it("pans only with Space, captures the pointer and releases on keyup, blur and c
 });
 
 
-it("pans from toolbar focus without a page click and preserves editable Space", () => {
+it("preserves toolbar activation and pans from page focus", () => {
   render(<PdfNavigationView pages={[page(1)]} />);
   const host = screen.getByRole('region', { name: 'PDF pages' });
   const button = screen.getByRole('button', { name: '100%' });
   button.focus(); fireEvent.click(button);
-  expect(fireEvent.keyDown(button, { code: 'Space' })).toBe(false);
+  expect(fireEvent.keyDown(button, { code: 'Space' })).toBe(true);
+  expect(host.className).not.toContain('can-pan');
+  host.focus();
+  expect(fireEvent.keyDown(host, { code: 'Space' })).toBe(false);
   const overlay = screen.getByLabelText('Highlights for page 1');
   fireEvent.pointerDown(overlay, { pointerId: 8, button: 0, clientX: 300, clientY: 300 });
   fireEvent.pointerMove(host, { pointerId: 8, buttons: 1, clientX: 200, clientY: 200 });
@@ -276,7 +279,7 @@ it('validates legends, snapshots assignment, detaches deleted drafts and preserv
   expect(screen.getByText(/No legends yet/)).toBeTruthy();
 });
 
-it('keeps Space editable in create and rename fields and reserves toolbar Space for pan', () => {
+it('keeps Space editable in create and rename fields and available for button activation', () => {
   render(<PdfNavigationView pages={[page(1)]} />);
   fireEvent.click(screen.getByRole('button', { name: 'Legends (0)' }));
   const input = screen.getByLabelText('Legend name');
@@ -291,8 +294,8 @@ it('keeps Space editable in create and rename fields and reserves toolbar Space 
   expect(fireEvent.keyDown(input, { code: 'Space' })).toBe(true);
   expect(host.className).not.toContain('can-pan');
   const button = screen.getByRole('button', { name: 'Select legend Wall area' });
-  expect(fireEvent.keyDown(button, { code: 'Space' })).toBe(false);
-  expect(host.className).toContain('can-pan');
+  expect(fireEvent.keyDown(button, { code: 'Space' })).toBe(true);
+  expect(host.className).not.toContain('can-pan');
   fireEvent.keyUp(button, { code: 'Space' });
   expect(host.className).not.toContain('can-pan');
 });
@@ -305,7 +308,7 @@ it('standalone history records one Shift/freehand stroke, restores IDs, and pres
  const id=svg.querySelector('[data-annotation-id]')?.getAttribute('data-annotation-id');expect(id).toBeTruthy();
  fireEvent.keyDown(window,{key:'z',ctrlKey:true});expect(svg.querySelector('[data-annotation-id]')).toBeNull();expect(screen.getByRole('button',{name:'Undo',exact:true}).hasAttribute('disabled')).toBe(true);
  fireEvent.click(screen.getByRole('button',{name:'Redo',exact:true}));expect(svg.querySelector('[data-annotation-id]')?.getAttribute('data-annotation-id')).toBe(id);
- const toolbar=screen.getByRole('button',{name:'Undo',exact:true});fireEvent.keyDown(toolbar,{key:' ',code:'Space'});expect(screen.getByLabelText('PDF pages').className).toContain('can-pan');fireEvent.keyUp(window,{key:' ',code:'Space'});
+ const toolbar=screen.getByRole('region',{name:'PDF pages',exact:true});fireEvent.keyDown(toolbar,{key:' ',code:'Space'});expect(screen.getByLabelText('PDF pages').className).toContain('can-pan');fireEvent.keyUp(window,{key:' ',code:'Space'});
 });
 
 it('bounds raster resources while navigating many pages and retains offscreen layout', () => {
@@ -320,4 +323,67 @@ it('bounds raster resources while navigating many pages and retains offscreen la
   expect(view.container.querySelectorAll('canvas').length).toBeLessThanOrEqual(8);
   fireEvent.change(input,{target:{value:'1'}});fireEvent.submit(input.closest('form')!);expect(screen.getByLabelText('PDF page 1')).not.toBe(first);
   const finalCanvas=screen.getByLabelText('PDF page 1') as HTMLCanvasElement;view.unmount();expect(finalCanvas.width).toBe(0);
+});
+
+it.each(['Escape', 'blur', 'tool', 'panel', 'preference'])('Hand pans without annotation/history changes and releases capture on %s', reason => {
+  const view=render(<PdfNavigationView pages={[page(1)]} />);
+  fireEvent.click(screen.getByRole('button', {name:'Hand / Pan'}));
+  const host=screen.getByRole('region', {name:'PDF pages'});
+  const svg=screen.getByLabelText('Highlights for page 1');
+  fireEvent.pointerDown(svg,{pointerId:7,button:0,clientX:300,clientY:300});
+  fireEvent.pointerMove(host,{pointerId:7,buttons:1,clientX:250,clientY:220});
+  expect([host.scrollLeft,host.scrollTop]).toEqual([50,80]);
+  expect(captured).toBe(7);
+  if(reason==='Escape')fireEvent.keyDown(host,{key:'Escape'});
+  if(reason==='blur')fireEvent.blur(window);
+  if(reason==='tool')fireEvent.click(screen.getByRole('button',{name:'Highlight',exact:true}));
+  if(reason==='panel')fireEvent.click(screen.getByRole('button',{name:'Close panel'}));
+  if(reason==='preference')view.rerender(<PdfNavigationView pages={[page(1)]} largerControls />);
+  expect(captured).toBeNull();
+  fireEvent.pointerUp(svg,{pointerId:7});
+  expect(svg.querySelector('[data-annotation-id]')).toBeNull();
+  if(reason==='panel')fireEvent.click(screen.getByRole('button',{name:'Tools / Properties',exact:true}));
+  expect(screen.getByRole('button',{name:'Undo',exact:true}).hasAttribute('disabled')).toBe(true);
+});
+
+it('closes the panel with Escape, restores its trigger focus, and reopens without trapping focus',()=>{
+  render(<PdfNavigationView pages={[page(1)]}/>);
+  const panel=screen.getByRole('complementary',{name:'Tools and properties'});
+  panel.focus();fireEvent.keyDown(panel,{key:'Escape'});
+  const trigger=screen.getByRole('button',{name:'Tools / Properties',exact:true});
+  expect(document.activeElement).toBe(trigger);expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  fireEvent.click(trigger);expect(document.activeElement).toBe(panel);
+  screen.getByRole('region',{name:'PDF pages'}).focus();
+  expect(document.activeElement).not.toBe(panel);
+});
+
+it.each(['panel','preference','hand'])('cancels unfinished highlights on %s without creating history',reason=>{
+ const view=render(<PdfNavigationView pages={[page(1)]}/>);const svg=screen.getByLabelText('Highlights for page 1');
+ Object.defineProperty(svg,'getBoundingClientRect',{value:()=>rect(0,0,600,800)});
+ fireEvent.pointerDown(svg,{pointerId:7,button:0,clientX:50,clientY:50});
+ fireEvent.pointerMove(svg,{pointerId:7,buttons:1,clientX:100,clientY:100});expect(captured).toBe(7);
+ if(reason==='panel')fireEvent.click(screen.getByRole('button',{name:'Close panel'}));
+ if(reason==='hand')fireEvent.click(screen.getByRole('button',{name:'Hand / Pan'}));
+ if(reason==='preference')view.rerender(<PdfNavigationView pages={[page(1)]} largerControls/>);
+ expect(captured).toBeNull();fireEvent.pointerUp(svg,{pointerId:7});expect(svg.querySelector('[data-annotation-id]')).toBeNull();
+ if(reason==='panel')fireEvent.click(screen.getByRole('button',{name:'Tools / Properties',exact:true}));
+ expect(screen.getByRole('button',{name:'Undo',exact:true}).hasAttribute('disabled')).toBe(true);
+});
+
+it('releases Space capture when switching between annotation tools',()=>{
+ render(<PdfNavigationView pages={[page(1)]}/>);
+ const host=screen.getByRole('region',{name:'PDF pages'});
+ fireEvent.keyDown(host,{code:'Space'});
+ fireEvent.pointerDown(host,{pointerId:7,button:0,clientX:300,clientY:300});
+ expect(captured).toBe(7);
+ fireEvent.click(screen.getByRole('button',{name:'Text',exact:true}));
+ expect(captured).toBeNull();expect(host.className).not.toContain('can-pan');
+});
+
+it('closes a narrow drawer on a drawing tool choice and moves focus to the plan',()=>{
+ vi.stubGlobal('innerWidth',420);
+ render(<PdfNavigationView pages={[page(1)]}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Text',exact:true}));
+ expect(screen.getByRole('button',{name:'Tools / Properties',exact:true}).getAttribute('aria-expanded')).toBe('false');
+ expect(document.activeElement).toBe(screen.getByRole('region',{name:'PDF pages'}));
 });

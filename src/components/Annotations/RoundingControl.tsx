@@ -14,7 +14,6 @@ function Sample({ value }: { value: number }) {
 export default function RoundingControl({ value, history, identity, onPreview, onCommit }: {
   value: number; history: SessionHistory; identity: unknown; onPreview: (value: number | null) => void; onCommit: (value: number, generation: number) => void;
 }) {
-  const [top,setTop]=useState(180);
   const details=useRef<HTMLDetailsElement>(null);
   const [draft, setDraft] = useState<number | null>(null);
   const active = useRef<{value:number; generation:number; commit:typeof onCommit} | null>(null);
@@ -38,13 +37,14 @@ export default function RoundingControl({ value, history, identity, onPreview, o
   useEffect(() => { cancel(); }, [identity]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') cancel(); };
+    const scroll=(e:Event)=>{if(e.target instanceof Element && e.target.closest('.workspace-panel'))return;cancel();};
     const hidden=()=>{if(document.hidden)cancel();};
-    window.addEventListener('keydown',key); window.addEventListener('blur',cancel); window.addEventListener('scroll',cancel,true); document.addEventListener('visibilitychange',hidden);
-    return () => { cancel(); window.removeEventListener('keydown',key); window.removeEventListener('blur',cancel); window.removeEventListener('scroll',cancel,true); document.removeEventListener('visibilitychange',hidden); };
+    window.addEventListener('keydown',key); window.addEventListener('blur',cancel); window.addEventListener('scroll',scroll,true); document.addEventListener('visibilitychange',hidden);
+    return () => { cancel(); window.removeEventListener('keydown',key); window.removeEventListener('blur',cancel); window.removeEventListener('scroll',scroll,true); document.removeEventListener('visibilitychange',hidden); };
   }, []);
-  return <details ref={details} className="rounding-control" onToggle={e => { if (!e.currentTarget.open) cancel(); else setTop(e.currentTarget.getBoundingClientRect().bottom+6); }}>
+  return <details ref={details} className="rounding-control" onToggle={e => { if (!e.currentTarget.open) cancel(); }}>
     <summary>Rounding {draft ?? value}%</summary>
-    <div className="rounding-popover" style={{top,maxHeight:`calc(100vh - ${top+12}px)`}} role="group" aria-label="Highlight rounding">
+    <div className="rounding-popover" role="group" aria-label="Highlight rounding">
       <strong>Highlight ends and bends</strong><button className="rounding-close" onClick={()=>{cancel();if(details.current)details.current.open=false;}}>Close rounding</button>
       <div className="rounding-presets">{[['Sharp',0],['Soft',50],['Round',100]].map(([name,n]) => <button key={name} aria-pressed={(draft ?? value) === n} onClick={() => { cancel(); onCommit(Number(n),history.generation); }}><Sample value={Number(n)} />{name}</button>)}</div>
       <label>Rounding <output>{draft ?? value}%</output><input ref={input} aria-label="Rounding" type="range" min="0" max="100" step="1" value={draft ?? value}
