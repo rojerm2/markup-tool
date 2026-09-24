@@ -34,7 +34,8 @@ export async function loadSource(path: string, signal: AbortSignal) {
   return { pages, source };
 }
 export async function resolveSource(projectPath: string, reference: string) {
-  // Native resolution only accepts an already user-authorized file. JSON cannot grant scope.
+  // Native resolution extracts bundled PDFs, or checks authorized references for legacy projects.
+  // Project JSON never grants filesystem scope.
   return invoke<string | null>('resolve_source', { projectPath, reference });
 }
 export async function writeProject(path: string | null, sourcePath: string, text: string) {

@@ -4,6 +4,8 @@ use std::{
     path::{Path, PathBuf},
 };
 use tauri_plugin_fs::FsExt;
+use tauri::Manager;
+use crate::portable;
 
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
 fn allowed(app: &tauri::AppHandle, path: &Path) -> Result<(), String> {
@@ -14,25 +16,25 @@ fn allowed(app: &tauri::AppHandle, path: &Path) -> Result<(), String> {
     }
 }
 #[tauri::command]
-pub fn read_project(app: tauri::AppHandle, path: PathBuf) -> Result<String, String> {
+pub async fn read_project(app: tauri::AppHandle, path: PathBuf) -> Result<String, String> {
     allowed(&app, &path)?;
-    let file = File::open(path).map_err(|e| e.to_string())?;
-    let mut bytes = Vec::new();
-    file.take(MAX_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    if bytes.len() as u64 > MAX_BYTES {
-        return Err("Project exceeds 16 MiB".into());
-    }
-    String::from_utf8(bytes).map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || portable::read(&path, false).map(|(text, _)| text))
+        .await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
-pub fn resolve_source(
+pub async fn resolve_source(
     app: tauri::AppHandle,
     project_path: PathBuf,
     reference: PathBuf,
 ) -> Result<Option<String>, String> {
     allowed(&app, &project_path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+    if let Some(bytes) = portable::read(&project_path, true)?.1 {
+        let path = app.state::<portable::EmbeddedSources>().extract(&bytes)?;
+        // Only this generated file is authorized; embedded references never extend scope.
+        app.fs_scope().allow_file(&path).map_err(|e| e.to_string())?;
+        return Ok(Some(path.to_string_lossy().into_owned()));
+    }
     let path = if reference.is_absolute() {
         reference
     } else {
@@ -46,6 +48,7 @@ pub fn resolve_source(
         return Ok(None);
     }
     Ok(Some(path.to_string_lossy().into_owned()))
+    }).await.map_err(|e| e.to_string())?
 }
 fn checked_destination(path: &Path, source: &Path) -> Result<PathBuf, String> {
     if !path.is_absolute() {
@@ -81,20 +84,7 @@ fn checked_destination(path: &Path, source: &Path) -> Result<PathBuf, String> {
         }
         // Existing destinations must be project JSON. Signature sniffing can miss a
         // renamed PDF with a long prefix, or mistake a legend named "%PDF-" for one.
-        let mut bytes = Vec::new();
-        File::open(&target)
-            .map_err(|e| e.to_string())?
-            .take(MAX_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|e| e.to_string())?;
-        let existing = serde_json::from_slice::<serde_json::Value>(&bytes).ok();
-        if bytes.len() as u64 > MAX_BYTES
-            || existing.as_ref().is_none_or(|v| {
-                v["format"] != "pdf-markup-project"
-                    || (v["version"] != 1 && v["version"] != 2)
-                    || !v["source"].is_object()
-            })
-        {
+        if portable::read(&target, false).is_err() {
             return Err(
                 "Cannot overwrite a PDF or non-project destination. Choose a new .pmarkup file"
                     .into(),
@@ -130,10 +120,11 @@ pub async fn write_project(
 ) -> Result<(), String> {
     allowed(&app, &path)?;
     allowed(&app, &source_path)?;
-    tauri::async_runtime::spawn_blocking(move || save_file(&path, &source_path, &text))
+    tauri::async_runtime::spawn_blocking(move || save_portable_file(&path, &source_path, &text))
         .await
         .map_err(|e| e.to_string())?
 }
+#[cfg(test)]
 fn save_file(path: &Path, source: &Path, text: &str) -> Result<(), String> {
     if text.len() as u64 > MAX_BYTES {
         return Err("Project exceeds 16 MiB".into());
@@ -159,6 +150,17 @@ fn save_file(path: &Path, source: &Path, text: &str) -> Result<(), String> {
     atomic_write(&target, &bytes, || {
         checked_destination(&target, &source).map(|_| ())
     })
+}
+
+fn save_portable_file(path: &Path, source: &Path, text: &str) -> Result<(), String> {
+    if text.len() as u64 > MAX_BYTES { return Err("Project annotations exceed 16 MiB".into()); }
+    let value = portable::envelope(text)?;
+    let target = checked_destination(path, source)?;
+    let size = value["source"]["size"].as_u64().ok_or("Missing PDF size")?;
+    let hash = value["source"]["sha256"].as_str().ok_or("Missing PDF hash")?;
+    let pdf = verified_source(source, size, hash)?;
+    let bytes = portable::encode(text, &pdf)?;
+    atomic_write(&target, &bytes, || checked_destination(&target, source).map(|_| ()))
 }
 
 // Export uses the same transactional sibling writer as editable projects.
@@ -313,6 +315,40 @@ pub async fn write_export(
 mod tests {
     use super::*;
     use std::fs;
+    #[test]
+    fn portable_save_reopen_resave_and_export_without_original() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("original.pdf");
+        let project = dir.path().join("plan.pmarkup");
+        let pdf = b"%PDF-original";
+        fs::write(&source, pdf).unwrap();
+        let (size, hash) = identity(pdf);
+        let text = serde_json::json!({"format":"pdf-markup-project", "version":2,
+            "source":{"reference":source,"filename":"original.pdf","size":size,"sha256":hash},
+            "session":{"notes":[{"text":"Keep this note"}]}}).to_string();
+        // Also upgrades an existing legacy JSON project in place.
+        fs::write(&project, &text).unwrap();
+        save_portable_file(&project, &source, &text).unwrap();
+        let moved = dir.path().join("moved.pmarkup");
+        fs::rename(&project, &moved).unwrap();
+        fs::remove_file(&source).unwrap();
+        let (restored, bytes) = portable::read(&moved, true).unwrap();
+        assert!(restored.contains("Keep this note"));
+        let cache = portable::EmbeddedSources::default();
+        let embedded = cache.extract(&bytes.unwrap()).unwrap();
+        save_portable_file(&moved, &embedded, &restored).unwrap();
+        let copy = dir.path().join("copy.pmarkup");
+        save_portable_file(&copy, &embedded, &restored).unwrap();
+        assert_eq!(portable::read(&copy, true).unwrap().1.unwrap(), pdf);
+        let export = dir.path().join("annotated.pdf");
+        export_file(&export, &embedded, Some(&moved), size, &hash, b"%PDF-exported").unwrap();
+        assert_eq!(fs::read(export).unwrap(), b"%PDF-exported");
+        // Failed identity verification must preserve the last good save.
+        let previous = fs::read(&moved).unwrap();
+        fs::write(&embedded, b"%PDF-changed").unwrap();
+        assert!(save_portable_file(&moved, &embedded, &restored).is_err());
+        assert_eq!(fs::read(&moved).unwrap(), previous);
+    }
     #[test]
     fn bounded_pdf_read_rejects_empty_and_oversized_before_allocation() {
         let dir = tempfile::tempdir().unwrap();

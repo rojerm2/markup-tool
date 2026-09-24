@@ -1,0 +1,14 @@
+import { createRoot } from 'react-dom/client';
+import { PDFDocument, rgb } from 'pdf-lib';
+import { loadDocument } from './services/pdfService';
+import PdfNavigationView from './components/PdfViewer/PdfNavigationView';
+import { emptySession } from './services/annotationSession';
+import './App.css';
+const doc = await PDFDocument.create();
+const p = doc.addPage([800,600]);
+p.drawText('GROUND FLOOR', { x:45,y:545,size:19 });
+p.drawText('Sample plan for interface review', { x:45,y:517,size:11 });
+for (const [x,y,w,h] of [[60,100,300,350],[360,100,360,200],[360,300,180,150],[540,300,180,150]]) p.drawRectangle({x,y,width:w,height:h,borderWidth:2,borderColor:rgb(.3,.4,.4)});
+const pdf = await loadDocument('sample.pdf', new AbortController().signal, await doc.save());
+const session = {...emptySession, legends:[{id:'walls',name:'Walls',color:'#facc15'},{id:'doors',name:'Doors',color:'#4ade80'}], activeLegendId:'walls'};
+createRoot(document.getElementById('root')!).render(<main className="app-shell"><PdfNavigationView pages={[await pdf.getPage(1)]} session={session}/></main>);

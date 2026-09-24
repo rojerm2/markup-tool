@@ -36,6 +36,25 @@ beforeEach(() => {
   vi.mocked(files.writeProject).mockResolvedValue('C:\\plans\\one.pmarkup');
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+it('opens a bundled project without a PDF picker, preserves its filename and exports from the included PDF', async () => {
+  const cached = 'C:\\Temp\\pdf-markup-included.pdf';
+  const project = parseProject(JSON.stringify({format:'pdf-markup-project', version:2, source, session:emptySession}));
+  vi.mocked(files.readProject).mockResolvedValue({path:'D:\\moved.pmarkup', project});
+  vi.mocked(files.resolveSource).mockResolvedValue(cached);
+  vi.mocked(files.loadSource).mockResolvedValue({pages:pages(),source:{...source,reference:cached,filename:'pdf-markup-included.pdf'}});
+  render(<App />);
+  click('Open Project'); await screen.findByLabelText('PDF page 2'); await idle();
+  expect(files.choosePdf).not.toHaveBeenCalled();
+  expect(status()).toContain(source.filename);
+  expect(status()).not.toContain('pdf-markup-included.pdf');
+  click('Save Project'); await idle();
+  const saved = vi.mocked(files.writeProject).mock.calls[0];
+  expect(saved[1]).toBe(cached);
+  expect(parseProject(saved[2]).source.filename).toBe(source.filename);
+  click('Export Annotated PDF'); await idle();
+  expect(exports.exportPdf).toHaveBeenCalledWith(cached, 'C:\\plans\\one.pmarkup',
+    expect.objectContaining({filename:source.filename}), expect.anything(), expect.any(AbortSignal));
+});
 it('first Save, subsequent Save, Save As, reopen and continued legend edits preserve stable state', async () => {
   render(<App />); await openPdf(); create(); click('Thick');
   expect(status()).toContain('Unsaved changes'); click('Save Project'); await idle();

@@ -342,7 +342,7 @@ it.each(['Escape', 'blur', 'tool', 'panel', 'preference'])('Hand pans without an
   expect(captured).toBeNull();
   fireEvent.pointerUp(svg,{pointerId:7});
   expect(svg.querySelector('[data-annotation-id]')).toBeNull();
-  if(reason==='panel')fireEvent.click(screen.getByRole('button',{name:'Tools / Properties',exact:true}));
+  if(reason==='panel')fireEvent.click(screen.getByRole('button',{name:'Properties',exact:true}));
   expect(screen.getByRole('button',{name:'Undo',exact:true}).hasAttribute('disabled')).toBe(true);
 });
 
@@ -350,7 +350,7 @@ it('closes the panel with Escape, restores its trigger focus, and reopens withou
   render(<PdfNavigationView pages={[page(1)]}/>);
   const panel=screen.getByRole('complementary',{name:'Tools and properties'});
   panel.focus();fireEvent.keyDown(panel,{key:'Escape'});
-  const trigger=screen.getByRole('button',{name:'Tools / Properties',exact:true});
+  const trigger=screen.getByRole('button',{name:'Properties',exact:true});
   expect(document.activeElement).toBe(trigger);expect(trigger.getAttribute('aria-expanded')).toBe('false');
   fireEvent.click(trigger);expect(document.activeElement).toBe(panel);
   screen.getByRole('region',{name:'PDF pages'}).focus();
@@ -366,7 +366,7 @@ it.each(['panel','preference','hand'])('cancels unfinished highlights on %s with
  if(reason==='hand')fireEvent.click(screen.getByRole('button',{name:'Hand / Pan'}));
  if(reason==='preference')view.rerender(<PdfNavigationView pages={[page(1)]} largerControls/>);
  expect(captured).toBeNull();fireEvent.pointerUp(svg,{pointerId:7});expect(svg.querySelector('[data-annotation-id]')).toBeNull();
- if(reason==='panel')fireEvent.click(screen.getByRole('button',{name:'Tools / Properties',exact:true}));
+ if(reason==='panel')fireEvent.click(screen.getByRole('button',{name:'Properties',exact:true}));
  expect(screen.getByRole('button',{name:'Undo',exact:true}).hasAttribute('disabled')).toBe(true);
 });
 
@@ -384,6 +384,6 @@ it('closes a narrow drawer on a drawing tool choice and moves focus to the plan'
  vi.stubGlobal('innerWidth',420);
  render(<PdfNavigationView pages={[page(1)]}/>);
  fireEvent.click(screen.getByRole('button',{name:'Text',exact:true}));
- expect(screen.getByRole('button',{name:'Tools / Properties',exact:true}).getAttribute('aria-expanded')).toBe('false');
+ expect(screen.getByRole('button',{name:'Properties',exact:true}).getAttribute('aria-expanded')).toBe('false');
  expect(document.activeElement).toBe(screen.getByRole('region',{name:'PDF pages'}));
 });

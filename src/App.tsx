@@ -1,3 +1,4 @@
+import ToolIcon from './components/Toolbar/ToolIcon';
 import './App.css';
 import { readLargerControls, writeLargerControls } from './services/uiPreferences';
 import { useEffect, useRef, useState } from 'react';
@@ -107,7 +108,8 @@ export default function App() {
         const session = selected?.project.session ?? structuredClone(emptySession);
         const previous = live.current;
         publish({ id: ++counter.current, sourcePath: path, projectPath: selected?.path ?? null,
-          ...loaded, session, history: new SessionHistory(session), saved: JSON.stringify(session), controller });
+          ...loaded, source: { ...loaded.source, filename: selected?.project.source.filename ?? loaded.source.filename },
+          session, history: new SessionHistory(session), saved: JSON.stringify(session), controller });
         staging.current = null;
         previous?.controller.abort();
       } finally { if (staging.current === controller) { controller.abort(); staging.current = null; } }
@@ -129,20 +131,19 @@ export default function App() {
       staging.current?.abort(); live.current?.controller.abort(); pending.current?.('cancel'); pending.current = null; };
   }, []);
   return <main className={`app-shell${largerControls ? ' larger-controls' : ''}`}>
-    <header className="app-header"><h1>PDF Floor Plan Markup</h1>
+    <header className="app-header"><h1><span className="app-mark"><ToolIcon name="file" /></span> PDF Markup</h1>
       <div className="project-actions" role="toolbar" aria-label="Project files">
         <button disabled={!!operation} onClick={() => void openWork(false)}>Open PDF</button>
         <button disabled={!!operation} onClick={() => void openWork(true)}>Open Project</button>
-        <button disabled={!work || !!operation} onClick={() => void run('saving', async () => { await saveCurrent(); })}>Save Project</button>
+        <button className="save-action" title="Save the PDF and editable annotations together in one project" disabled={!work || !!operation} onClick={() => void run('saving', async () => { await saveCurrent(); })}>Save Project</button>
         <button disabled={!work || !!operation} onClick={() => void run('saving', async () => { await saveCurrent(true); })}>Save As</button>
-        <button disabled={!work || !!operation} onClick={() => void exportCurrent()}>Export Annotated PDF</button>
+        <button className="primary-action" disabled={!work || !!operation} onClick={() => void exportCurrent()}>Export Annotated PDF</button>
       </div><label className="size-preference"><input type="checkbox" checked={largerControls} onChange={e => { setLargerControls(e.target.checked); writeLargerControls(e.target.checked); }} />Larger controls</label></header>
-    <p className="file-guidance">Save Project keeps your work editable. Export PDF creates a copy to share or print.</p>
     <p className="document-name" role="status">{work ? `${work.projectPath?.split(/[\\/]/).pop() ?? 'Unsaved project'} · PDF: ${work.source.filename} · ${dirty(work) ? 'Unsaved changes' : work.projectPath ? 'Saved' : 'Ready to save'}` : 'Open a PDF or an editable project.'}{operation && ` · ${operation === 'exporting' ? 'Exporting...' : operation === 'saving' ? 'Saving…' : operation === 'opening' ? 'Opening…' : 'Closing…'}`}{!operation && notice && ` | ${notice}`}</p>
     {error && <p role="alert" className="project-error">{error}</p>}
     {operation && notice && <p role="status" className="document-name">{notice}</p>}
     <div className="project-workspace" inert={operation === 'opening' || operation === 'closing'}>
-      {work ? <PdfNavigationView largerControls={largerControls} key={work.id} pages={work.pages} session={work.session} history={work.history} onHistory={traverse} onAction={(action, generation) => mutate(action, generation, work.id)} disabled={operation === 'opening' || operation === 'closing'} /> : <p className="empty-document">No PDF selected.</p>}
+      {work ? <PdfNavigationView largerControls={largerControls} key={work.id} pages={work.pages} session={work.session} history={work.history} onHistory={traverse} onAction={(action, generation) => mutate(action, generation, work.id)} disabled={operation === 'opening' || operation === 'closing'} /> : <section className="empty-document"><span className="empty-icon"><ToolIcon name="file" /></span><h2>A clear space for your ideas.</h2><p>Highlight, draw, and add notes to your PDF.<br />Save your PDF and edits together in one project.</p><button className="primary-action" disabled={!!operation} onClick={() => void openWork(false)}>Open a PDF to get started</button><p className="empty-tip">Already started? Use Open Project to pick up where you left off.</p></section>}
     </div>
     {question && <DirtyDialog answer={answer} />}
   </main>;

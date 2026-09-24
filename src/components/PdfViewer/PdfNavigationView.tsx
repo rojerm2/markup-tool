@@ -1,3 +1,4 @@
+import ToolIcon from '../Toolbar/ToolIcon';
 import NoteOverlay from '../Annotations/NoteOverlay';
 import NoteControls from '../Annotations/NoteControls';
 import { moveNote, type TextNote } from '../../services/notes';
@@ -127,13 +128,17 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
   }
   const panelButton = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLElement>(null);
+  const focusPanel = useRef(false);
   function togglePanel(open: boolean) {
     history.invalidate(); setViewRevision(v => v + 1); setPanelOpen(open);
     if (!open) panelButton.current?.focus();
+    focusPanel.current = open;
   }
+  useLayoutEffect(() => {
+    if (panelOpen && focusPanel.current) { panel.current?.focus(); focusPanel.current = false; }
+  }, [panelOpen]);
   useEffect(() => { history.invalidate(); setViewRevision(v => v + 1); }, [largerControls]);
   const pan = useSpacePan(host, tool === 'pan', `${viewRevision}:${tool}`, disabled);
-  useEffect(() => { if (panelOpen && !editingNote) panel.current?.focus(); }, [panelOpen]);
   useEffect(() => { if (editingNote) { setPanelOpen(true); requestAnimationFrame(() => panel.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus()); } }, [editingNote]);
   useEffect(()=>history.subscribeCancellation(()=>setPlacing(false)),[history]);
   useEffect(()=>{setPlacing(false);},[viewRevision,mode,zoom,disabled]);
@@ -289,45 +294,26 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
 
   function selectNote(id:string,pointer?:string){if(id!==selectedNote||(pointer??null)!==selectedPointer)history.invalidate();const n=session.notes?.find(n=>n.id===id);if(n&&n.page!==current)navigate(n.page);setSelectedNote(id||null);setSelectedPointer(pointer??null);setSelectedShape(null);setSelectedKey(null);setSelectedId(null);setTool('edit');}
   return <div ref={root} className="pdf-navigation">
-    <div className="pdf-controls" role="toolbar" aria-label="PDF navigation">
-      <div className="control-group" role="group" aria-label="Pages">
-      <button disabled={current === 1} onClick={() => navigate(current - 1)}>Previous page</button>
-      <form onSubmit={event => { event.preventDefault(); navigate(Number(pageInput)); }}>
-        <label>Page <input aria-label="Page number" inputMode="numeric" value={pageInput}
-          onChange={event => setPageInput(event.target.value)} onBlur={() => { if (pageInput !== String(current)) navigate(Number(pageInput)); }} /></label>
-        <span> of {pages.length}</span>
-      </form>
-      <button disabled={current === pages.length} onClick={() => navigate(current + 1)}>Next page</button>
-      </div><div className="control-group" role="group" aria-label="Zoom">
-      <button aria-label="Zoom out" disabled={mode === "manual" && zoom <= MIN_ZOOM} onClick={() => changeZoom(activeScale / 1.25)}>−</button>
-      <output aria-label="Zoom level">{Math.round(activeScale * 100)}%</output>
-      <button aria-label="Zoom in" disabled={mode === "manual" && zoom >= MAX_ZOOM} onClick={() => changeZoom(activeScale * 1.25)}>+</button>
-      <button onClick={() => changeZoom(1)}>100%</button>
-      <button aria-pressed={mode === "page"} onClick={() => fit("page")}>Fit to page</button>
-      <button aria-pressed={mode === "width"} onClick={() => fit("width")}>Fit to width</button>
+    <div className="primary-tools" role="toolbar" aria-label="Markup tools">
+      <div className="tool-modes" role="group" aria-label="History">
+        <button disabled={disabled || !history.undoLabel} title={`Undo ${history.undoLabel ?? ''} (Ctrl+Z)`} aria-keyshortcuts="Control+z" onClick={() => traverse('undo')}><ToolIcon name="undo" />Undo</button>
+        <button disabled={disabled || !history.redoLabel} title={`Redo ${history.redoLabel ?? ''} (Ctrl+Y / Ctrl+Shift+Z)`} aria-keyshortcuts="Control+y Control+Shift+z" onClick={() => traverse('redo')}><ToolIcon name="redo" />Redo</button>
       </div>
-
-    </div>
-    <div className="workspace-bar">
-      <button ref={panelButton} aria-expanded={panelOpen} aria-controls="workspace-panel" onClick={() => togglePanel(!panelOpen)}>Tools / Properties</button>
-      <span role="status">{tool === 'pan' ? 'Hand / Pan' : tool === 'edit' ? 'Select / Edit' : tool.charAt(0).toUpperCase() + tool.slice(1)}{activeLegendId ? ` / ${session.legends.find(l => l.id === activeLegendId)?.name ?? ''}` : tool === 'highlight' ? ` / ${COLORS.find(c=>c.value===drawing.color)?.name??'Saved color'}` : ''}</span>
-      <button aria-pressed={tool === 'pan'} onClick={() => { history.invalidate(); setPlacing(false); setPointerPlacement(null); setSelectedNote(null); setSelectedShape(null); setSelectedKey(null); setSelectedId(null); setTool('pan'); }}>Hand / Pan</button>
+      <div className="tool-modes" role="group" aria-label="Annotation mode">
+        <button aria-pressed={tool === 'highlight'} onClick={() => { setPlacing(false); setSelectedKey(null); history.invalidate(); setSelectedShape(null); setTool('highlight'); setSelectedNote(null); setSelectedId(null); }}><ToolIcon name="highlight" />Highlight</button>
+        <button aria-pressed={tool === 'edit'} onClick={() => {history.invalidate();setPlacing(false);setTool('edit');}}><ToolIcon name="select" />Select/Edit</button>
+      </div>
+      <label className="shape-tool-label">Shape <select aria-label="Shape tool" value={['rectangle','ellipse','line'].includes(tool)?tool:''} onChange={e=>{if(!e.target.value)return;history.invalidate();setPlacing(false);setSelectedKey(null);setSelectedId(null);setSelectedShape(null);setSelectedNote(null);setTool(e.target.value as ShapeKind);}}><option value="">Choose shape</option><option value="rectangle">Rectangle</option><option value="ellipse">Ellipse</option><option value="line">Line</option></select></label>
+      <button aria-pressed={tool==='text'} onClick={()=>{history.invalidate();setPlacing(false);setSelectedNote(null);setSelectedShape(null);setSelectedKey(null);setSelectedId(null);setTool('text');}}><ToolIcon name="text" />Text</button>
+      <button aria-pressed={tool==='arrow'} onClick={()=>{history.invalidate();setPlacing(false);setSelectedNote(null);setSelectedShape(null);setSelectedKey(null);setSelectedId(null);setTool('arrow');}}><ToolIcon name="arrow" />Arrow</button>
+      <button aria-pressed={tool === 'pan'} onClick={() => { history.invalidate(); setPlacing(false); setPointerPlacement(null); setSelectedNote(null); setSelectedShape(null); setSelectedKey(null); setSelectedId(null); setTool('pan'); }}><ToolIcon name="hand" />Hand / Pan</button>
+      <button className="properties-toggle" ref={panelButton} aria-expanded={panelOpen} aria-controls="workspace-panel" onClick={() => togglePanel(!panelOpen)}><ToolIcon name="panel" />Properties</button>
     </div>
     <div className="workspace-body">
     <aside ref={panel} id="workspace-panel" className="workspace-panel" aria-label="Tools and properties" tabIndex={-1} hidden={!panelOpen} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); togglePanel(false); } }}>
-      <div className="panel-heading"><strong>Tools / Properties</strong><button onClick={() => togglePanel(false)}>Close panel</button></div>
+      <div className="panel-heading"><strong>Properties</strong><button onClick={() => togglePanel(false)} aria-label="Close panel" title="Close properties">×</button></div>
+      <p className="inspector-status" role="status">{tool === 'pan' ? 'Move around the page' : tool === 'edit' ? 'Select an annotation to edit' : tool.charAt(0).toUpperCase() + tool.slice(1)}{tool === 'highlight' ? ` · ${session.legends.find(l => l.id === activeLegendId)?.name ?? COLORS.find(c => c.value === drawing.color)?.name ?? 'Custom color'}` : ''}</p>
     <div className="annotation-tools">
-      <div className="tool-modes" role="group" aria-label="History">
-        <button disabled={disabled || !history.undoLabel} title={`Undo ${history.undoLabel ?? ''} (Ctrl+Z)`} aria-keyshortcuts="Control+z" onClick={() => traverse('undo')}>Undo</button>
-        <button disabled={disabled || !history.redoLabel} title={`Redo ${history.redoLabel ?? ''} (Ctrl+Y / Ctrl+Shift+Z)`} aria-keyshortcuts="Control+y Control+Shift+z" onClick={() => traverse('redo')}>Redo</button>
-      </div>
-      <div className="tool-modes" role="group" aria-label="Annotation mode">
-        <button aria-pressed={tool === 'highlight'} onClick={() => { setPlacing(false); setSelectedKey(null); history.invalidate(); setSelectedShape(null); setTool('highlight'); setSelectedNote(null); setSelectedId(null); }}>Highlight</button>
-        <button aria-pressed={tool === 'edit'} onClick={() => {history.invalidate();setPlacing(false);setTool('edit');}}>Select/Edit</button>
-      </div>
-      <label className="shape-tool-label">Shape <select aria-label="Shape tool" value={['rectangle','ellipse','line'].includes(tool)?tool:''} onChange={e=>{if(!e.target.value)return;history.invalidate();setPlacing(false);setSelectedKey(null);setSelectedId(null);setSelectedShape(null);setSelectedNote(null);setTool(e.target.value as ShapeKind);}}><option value="">Draw?</option><option value="rectangle">Rectangle</option><option value="ellipse">Ellipse</option><option value="line">Line</option></select></label>
-      <button aria-pressed={tool==='text'} onClick={()=>{history.invalidate();setPlacing(false);setSelectedNote(null);setSelectedShape(null);setSelectedKey(null);setSelectedId(null);setTool('text');}}>Text</button>
-      <button aria-pressed={tool==='arrow'} onClick={()=>{history.invalidate();setPlacing(false);setSelectedNote(null);setSelectedShape(null);setSelectedKey(null);setSelectedId(null);setTool('arrow');}}>Arrow</button>
       {(tool==='edit'||tool==='text'||tool==='arrow')&&<NoteControls notes={session.notes??[]} selected={selectedNote} pointer={selectedPointer} onSelect={selectNote} editing={editingNote} onEdit={setEditingNote} onClose={()=>setEditingNote(null)} onPointer={()=>{history.invalidate();setPointerPlacement(selectedNote);if(window.innerWidth<=800)setPanelOpen(false);}} placing={!!pointerPlacement} history={history} dispatch={dispatch} disabled={disabled} revision={`${viewRevision}:${mode}:${zoom}:${tool}`}/>}
       {tool === 'highlight' ? <DrawingControls value={drawing} onChange={(drawing, manual) => dispatch({ type: 'drawing', drawing, manual })} />
         : tool === 'edit' && !currentShape && !selectedNote ? <EditingControls session={session} selectedId={selectedId} onSelect={selectStroke} dispatch={dispatch} /> : null}
@@ -367,6 +353,25 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
         })}
       </div>
     </div>
+    </div>
+    <div className="pdf-controls" role="toolbar" aria-label="PDF navigation">
+      <div className="control-group" role="group" aria-label="Pages">
+      <button disabled={current === 1} onClick={() => navigate(current - 1)}>Previous page</button>
+      <form onSubmit={event => { event.preventDefault(); navigate(Number(pageInput)); }}>
+        <label>Page <input aria-label="Page number" inputMode="numeric" value={pageInput}
+          onChange={event => setPageInput(event.target.value)} onBlur={() => { if (pageInput !== String(current)) navigate(Number(pageInput)); }} /></label>
+        <span> of {pages.length}</span>
+      </form>
+      <button disabled={current === pages.length} onClick={() => navigate(current + 1)}>Next page</button>
+      </div><div className="control-group" role="group" aria-label="Zoom">
+      <button aria-label="Zoom out" disabled={mode === "manual" && zoom <= MIN_ZOOM} onClick={() => changeZoom(activeScale / 1.25)}>−</button>
+      <output aria-label="Zoom level">{Math.round(activeScale * 100)}%</output>
+      <button aria-label="Zoom in" disabled={mode === "manual" && zoom >= MAX_ZOOM} onClick={() => changeZoom(activeScale * 1.25)}>+</button>
+      <button onClick={() => changeZoom(1)}>100%</button>
+      <button aria-pressed={mode === "page"} onClick={() => fit("page")}>Fit to page</button>
+      <button aria-pressed={mode === "width"} onClick={() => fit("width")}>Fit to width</button>
+      </div>
+
     </div>
     <footer id="pan-hint">{placing ? 'Click the page to place the legend. Escape cancels.' : pointerPlacement ? 'Click a target on the note page. Escape cancels.' : tool === 'pan' ? 'Drag the plan to move the view' : tool === 'text' ? 'Click the page, type your note, then Apply text' : tool === 'arrow' ? 'Drag from the start to the arrow target' : tool === 'edit' ? currentShape ? 'Drag to move; handles resize; arrow keys nudge' : 'Click or choose a stroke to edit · Drag to move · Escape clears selection' : tool === 'highlight' ? 'Drag to highlight · Shift for straight line' : 'Drag a shape; Shift constrains; select to move or resize'} · Space + drag to pan · Ctrl + wheel to zoom</footer>
   </div>;
