@@ -23,6 +23,10 @@ import { isEditingControl } from '../../services/annotationEditing';
 import { emptySession, type AnnotationSession, type SessionAction } from "../../services/annotationSession";
 
 import { SessionHistory } from "../../services/sessionHistory";
+import { historyChangeRegions, type ChangeRegion } from '../../services/historyFeedback';
+import HistoryChangeOverlay, { changeViewportBounds } from '../Annotations/HistoryChangeOverlay';
+import { playActionSound } from '../../services/actionSounds';
+import { isSpaceKey } from '../../services/canvasFocus';
 
 const GUTTER = 32;
 const LABEL_HEIGHT = 28;
@@ -32,15 +36,25 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
   const [, refresh] = useState(0);
   const history = suppliedHistory ?? local;
   const session = controlled ?? history.present;
+  const [historyFeedback, setHistoryFeedback] = useState<{ id: number; message: string; regions: ChangeRegion[] } | null>(null);
+  const feedbackId = useRef(0);
   const dispatch = (action: SessionAction, generation?: number) => {
     if (disabled) return;
+    const before = history.present;
     if (onAction) onAction(action, generation);
     else if (history.apply(action, generation)) refresh(v => v + 1);
+    if (history.present !== before && !['drawing', 'select', 'create', 'rename', 'delete', 'edit-stroke'].includes(action.type)) playActionSound('markup');
   };
   function traverse(direction: 'undo' | 'redo') {
     if (disabled) return;
+    const before = history.present, label = direction === 'undo' ? history.undoLabel : history.redoLabel;
     const changed = onHistory ? onHistory(direction) : history.traverse(direction);
-    if (changed) { setSelectedNote(null); setSelectedPointer(null); setSelectedShape(null); setSelectedKey(null); setPlacing(false); setSelectedId(null); refresh(v => v + 1); }
+    if (changed) {
+      const regions = historyChangeRegions(before, history.present), affected = [...new Set(regions.map(r => r.page))];
+      setHistoryFeedback({ id: ++feedbackId.current, regions, message: `${direction === 'undo' ? 'Undid' : 'Redid'} ${label}${affected.length ? ` · ${affected.length === 1 ? `Page ${affected[0]}` : `${affected.length} pages`}` : ''}` });
+      playActionSound(direction);
+      setSelectedNote(null); setSelectedPointer(null); setSelectedShape(null); setSelectedKey(null); setPlacing(false); setSelectedId(null); refresh(v => v + 1);
+    }
   }
   const { drawing, annotations, activeLegendId } = session;
   const [placementRows,setPlacementRows]=useState<string[]|null>(null);
@@ -102,6 +116,16 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
         && event.target instanceof Node && root.current?.contains(event.target)) {
         event.preventDefault(); dispatch({ type: 'remove-stroke', id: selectedId });
       }
+      const stroke = annotations.find(s => s.id === selectedId);
+      const delta: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+      if (stroke && delta[event.key] && !event.ctrlKey && !event.metaKey && !event.altKey
+        && event.target instanceof Node && root.current?.contains(event.target)) {
+        event.preventDefault();
+        const distance = event.shiftKey ? 10 : 2, vp = pages[stroke.page - 1].getViewport({ scale: 1 });
+        const p = viewportToPdf({ x: 0, y: 0 }, vp), q = viewportToPdf({ x: delta[event.key][0] * distance, y: delta[event.key][1] * distance }, vp);
+        dispatch({ type: 'move-stroke', before: stroke, legends: session.legends,
+          points: stroke.points.map(point => ({ x: point.x + q.x - p.x, y: point.y + q.y - p.y })) });
+      }
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
@@ -142,7 +166,7 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
   useEffect(() => { if (editingNote) { setPanelOpen(true); requestAnimationFrame(() => panel.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus()); } }, [editingNote]);
   useEffect(()=>history.subscribeCancellation(()=>setPlacing(false)),[history]);
   useEffect(()=>{setPlacing(false);},[viewRevision,mode,zoom,disabled]);
-  useEffect(()=>{const cancel=(e?:Event)=>{if(e?.type==='scroll'&&e.target instanceof Element&&e.target.closest('.workspace-panel'))return;setPlacing(false);};const key=(e:KeyboardEvent)=>{if(e.code==='Space'&&!isEditingControl(e.target))cancel();};window.addEventListener('blur',cancel);window.addEventListener('scroll',cancel,true);window.addEventListener('keydown',key);document.addEventListener('visibilitychange',cancel);return()=>{window.removeEventListener('blur',cancel);window.removeEventListener('scroll',cancel,true);window.removeEventListener('keydown',key);document.removeEventListener('visibilitychange',cancel);};},[]);
+  useEffect(()=>{const cancel=(e?:Event)=>{if(e?.type==='scroll'&&e.target instanceof Element&&e.target.closest('.workspace-panel'))return;setPlacing(false);};const key=(e:KeyboardEvent)=>{if(isSpaceKey(e)&&!isEditingControl(e.target))cancel();};window.addEventListener('blur',cancel);window.addEventListener('scroll',cancel,true);window.addEventListener('keydown',key);document.addEventListener('visibilitychange',cancel);return()=>{window.removeEventListener('blur',cancel);window.removeEventListener('scroll',cancel,true);window.removeEventListener('keydown',key);document.removeEventListener('visibilitychange',cancel);};},[]);
   useEffect(()=>{if(selectedKey&&!session.pageLegends?.some(k=>k.id===selectedKey))setSelectedKey(null);},[session.pageLegends,selectedKey]);
   const scales = pages.map(page => mode === "manual" ? zoom : fitScale(
     page.getViewport({ scale: 1 }),
@@ -167,6 +191,24 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
   useEffect(()=>{setPointerPlacement(null);setEditingNote(null);},[tool,viewRevision,mode,zoom,disabled]);
   useEffect(()=>{if(selectedNote&&!session.notes?.some(n=>n.id===selectedNote))setSelectedNote(null);},[session.notes,selectedNote]);
   const activeScale = scales[current - 1];
+
+  useEffect(() => {
+    if (!historyFeedback) return;
+    const timer = window.setTimeout(() => setHistoryFeedback(null), 2200);
+    return () => window.clearTimeout(timer);
+  }, [historyFeedback]);
+  useLayoutEffect(() => {
+    if (!historyFeedback?.regions.length) return;
+    const region = historyFeedback.regions.find(r => r.page === current) ?? historyFeedback.regions[0];
+    const element = host.current, canvas = pageCanvas(region.page);
+    if (!element || !canvas) return;
+    const box = changeViewportBounds(region, pages[region.page - 1].getViewport({ scale: scales[region.page - 1] }));
+    const page = canvas.getBoundingClientRect(), view = element.getBoundingClientRect();
+    const x = page.left + box.x + box.width / 2, y = page.top + box.y + box.height / 2;
+    if (x < view.left + 20 || x > view.left + element.clientWidth - 20) element.scrollLeft += x - view.left - element.clientWidth / 2;
+    if (y < view.top + 20 || y > view.top + element.clientHeight - 20) element.scrollTop += y - view.top - element.clientHeight / 2;
+    updateCurrent();
+  }, [historyFeedback?.id]);
 
   function pageCanvas(number: number) {
     return host.current?.querySelector<HTMLElement>(`[data-page="${number}"] canvas`)
@@ -203,6 +245,14 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
     }
     setCurrent(number);
     setPageInput(String(number));
+  }
+
+  function submitPage() {
+    const number = Number(pageInput);
+    navigate(number);
+    host.current?.focus({ preventScroll: true });
+    // Focus triggers blur synchronously, before React publishes the new page.
+    setPageInput(String(Number.isInteger(number) && number >= 1 && number <= pages.length ? number : current));
   }
 
   function changeZoom(scale: number, pointer?: Point, pageNumber = current) {
@@ -295,7 +345,7 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
   function selectNote(id:string,pointer?:string){if(id!==selectedNote||(pointer??null)!==selectedPointer)history.invalidate();const n=session.notes?.find(n=>n.id===id);if(n&&n.page!==current)navigate(n.page);setSelectedNote(id||null);setSelectedPointer(pointer??null);setSelectedShape(null);setSelectedKey(null);setSelectedId(null);setTool('edit');}
   return <div ref={root} className="pdf-navigation">
     <div className="primary-tools" role="toolbar" aria-label="Markup tools">
-      <div className="tool-modes" role="group" aria-label="History">
+      <div className="tool-modes" role="group" aria-label="History" data-own-feedback>
         <button disabled={disabled || !history.undoLabel} title={`Undo ${history.undoLabel ?? ''} (Ctrl+Z)`} aria-keyshortcuts="Control+z" onClick={() => traverse('undo')}><ToolIcon name="undo" />Undo</button>
         <button disabled={disabled || !history.redoLabel} title={`Redo ${history.redoLabel ?? ''} (Ctrl+Y / Ctrl+Shift+Z)`} aria-keyshortcuts="Control+y Control+Shift+z" onClick={() => traverse('redo')}><ToolIcon name="redo" />Redo</button>
       </div>
@@ -308,6 +358,7 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
       <button aria-pressed={tool==='arrow'} onClick={()=>{history.invalidate();setPlacing(false);setSelectedNote(null);setSelectedShape(null);setSelectedKey(null);setSelectedId(null);setTool('arrow');}}><ToolIcon name="arrow" />Arrow</button>
       <button aria-pressed={tool === 'pan'} onClick={() => { history.invalidate(); setPlacing(false); setPointerPlacement(null); setSelectedNote(null); setSelectedShape(null); setSelectedKey(null); setSelectedId(null); setTool('pan'); }}><ToolIcon name="hand" />Hand / Pan</button>
       <button className="properties-toggle" ref={panelButton} aria-expanded={panelOpen} aria-controls="workspace-panel" onClick={() => togglePanel(!panelOpen)}><ToolIcon name="panel" />Properties</button>
+      {historyFeedback && <span className="history-feedback" role="status" key={historyFeedback.id}>{historyFeedback.message}</span>}
     </div>
     <div className="workspace-body">
     <aside ref={panel} id="workspace-panel" className="workspace-panel" aria-label="Tools and properties" tabIndex={-1} hidden={!panelOpen} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); togglePanel(false); } }}>
@@ -315,8 +366,8 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
       <p className="inspector-status" role="status">{tool === 'pan' ? 'Move around the page' : tool === 'edit' ? 'Select an annotation to edit' : tool.charAt(0).toUpperCase() + tool.slice(1)}{tool === 'highlight' ? ` · ${session.legends.find(l => l.id === activeLegendId)?.name ?? COLORS.find(c => c.value === drawing.color)?.name ?? 'Custom color'}` : ''}</p>
     <div className="annotation-tools">
       {(tool==='edit'||tool==='text'||tool==='arrow')&&<NoteControls notes={session.notes??[]} selected={selectedNote} pointer={selectedPointer} onSelect={selectNote} editing={editingNote} onEdit={setEditingNote} onClose={()=>setEditingNote(null)} onPointer={()=>{history.invalidate();setPointerPlacement(selectedNote);if(window.innerWidth<=800)setPanelOpen(false);}} placing={!!pointerPlacement} history={history} dispatch={dispatch} disabled={disabled} revision={`${viewRevision}:${mode}:${zoom}:${tool}`}/>}
-      {tool === 'highlight' ? <DrawingControls value={drawing} onChange={(drawing, manual) => dispatch({ type: 'drawing', drawing, manual })} />
-        : tool === 'edit' && !currentShape && !selectedNote ? <EditingControls session={session} selectedId={selectedId} onSelect={selectStroke} dispatch={dispatch} /> : null}
+      {tool === 'highlight' ? <DrawingControls value={drawing} history={history} onChange={(drawing, manual) => dispatch({ type: 'drawing', drawing, manual })} />
+        : tool === 'edit' && !currentShape && !selectedNote ? <EditingControls session={session} history={history} selectedId={selectedId} onSelect={selectStroke} dispatch={dispatch} /> : null}
       {(tool==='edit'&&!selectedNote||['rectangle','ellipse','line'].includes(tool)) && <ShapeControls showProperties={!!currentShape||['rectangle','ellipse','line'].includes(tool)} line={tool==='line'} shapes={session.shapes??[]} selected={selectedShape} onSelect={selectShape} value={currentShape??shapeStyle} onChange={style=>{if(currentShape)dispatch({type:'put-shape',shape:{...currentShape,...style},before:currentShape});else setShapeStyle(style);}} onDelete={currentShape?()=>dispatch({type:'remove-shape',id:currentShape.id}):undefined} />}
       {(tool === 'highlight' || roundingStroke) && <RoundingControl key={`${tool}:${selectedId}:${viewRevision}:${mode}:${zoom}:${disabled}`} value={roundingStroke?.rounding ?? (tool === 'highlight' ? drawing.rounding : undefined) ?? 100} history={history} identity={roundingStroke ?? drawing} onPreview={setRoundingPreview}
         onCommit={(rounding,generation)=>{if(roundingStroke)dispatch({type:'edit-stroke',id:roundingStroke.id,before:roundingStroke,edit:{rounding}},generation);else {const next={...drawing};if(rounding===100)delete next.rounding;else next.rounding=rounding;dispatch({type:'drawing',drawing:next,manual:false},generation);}}} />}
@@ -328,7 +379,7 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
       onSelect={id=>{setSelectedNote(null);const k=session.pageLegends?.find(k=>k.id===id);if(k&&k.page!==current)navigate(k.page);setSelectedShape(null);setSelectedKey(id||null);setSelectedId(null);setTool('edit');}}/>
     </aside>
     <div ref={host} {...pan} className={`pdf-scroll ${pan.className}`} tabIndex={0}
-      role="region" aria-label="PDF pages" aria-describedby="pan-hint" onScroll={updateCurrent}
+      role="region" aria-label="PDF pages" onScroll={updateCurrent}
       onPointerDown={event => {
         if (tool === 'edit' && event.button === 0 && event.target instanceof Element && !event.target.closest('.annotation-overlay')) setSelectedId(null);
       }}>
@@ -348,6 +399,7 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
               <PageLegendOverlay rows={rows} page={page.pageNumber} viewport={viewport} session={session} history={history} placing={placing}
                 onPlaced={()=>{setPlacing(false);setPanelOpen(true);}} selected={selectedKey} onSelect={id=>{setSelectedNote(null);setSelectedShape(null);setSelectedKey(id);setSelectedId(null);setTool('edit');}}
                 dispatch={dispatch} editing={tool==='edit'&&!pointerPlacement} disabled={disabled||!!editingNote||!!pointerPlacement} revision={viewRevision}/>
+              {historyFeedback && <HistoryChangeOverlay key={historyFeedback.id} regions={historyFeedback.regions.filter(r => r.page === page.pageNumber)} viewport={viewport} />}
             </PdfPage>
           </div>;
         })}
@@ -357,22 +409,26 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
     <div className="pdf-controls" role="toolbar" aria-label="PDF navigation">
       <div className="control-group" role="group" aria-label="Pages">
       <button disabled={current === 1} onClick={() => navigate(current - 1)}>Previous page</button>
-      <form onSubmit={event => { event.preventDefault(); navigate(Number(pageInput)); }}>
-        <label>Page <input aria-label="Page number" inputMode="numeric" value={pageInput}
-          onChange={event => setPageInput(event.target.value)} onBlur={() => { if (pageInput !== String(current)) navigate(Number(pageInput)); }} /></label>
+      <form onSubmit={event => { event.preventDefault(); submitPage(); }}>
+        <label>Page <input aria-label="Page number" inputMode="numeric" pattern="[0-9]*" data-canvas-space-pan value={pageInput}
+          onChange={event => { if (/^\d*$/.test(event.target.value)) setPageInput(event.target.value); }}
+          onKeyDown={event => {
+            if (event.key === 'Enter') { event.preventDefault(); submitPage(); }
+            else if (event.key === 'Escape') { event.preventDefault(); setPageInput(String(current)); host.current?.focus({ preventScroll: true }); }
+            else if (event.key.length === 1 && !/\d/.test(event.key) && !event.ctrlKey && !event.metaKey && !event.altKey) event.preventDefault();
+          }} onBlur={() => setPageInput(String(current))} /></label>
         <span> of {pages.length}</span>
       </form>
       <button disabled={current === pages.length} onClick={() => navigate(current + 1)}>Next page</button>
       </div><div className="control-group" role="group" aria-label="Zoom">
-      <button aria-label="Zoom out" disabled={mode === "manual" && zoom <= MIN_ZOOM} onClick={() => changeZoom(activeScale / 1.25)}>−</button>
+      <button className="zoom-step" aria-label="Zoom out" title="Zoom out" disabled={mode === "manual" && zoom <= MIN_ZOOM} onClick={() => changeZoom(activeScale / 1.25)}>−</button>
       <output aria-label="Zoom level">{Math.round(activeScale * 100)}%</output>
-      <button aria-label="Zoom in" disabled={mode === "manual" && zoom >= MAX_ZOOM} onClick={() => changeZoom(activeScale * 1.25)}>+</button>
+      <button className="zoom-step" aria-label="Zoom in" title="Zoom in" disabled={mode === "manual" && zoom >= MAX_ZOOM} onClick={() => changeZoom(activeScale * 1.25)}>+</button>
       <button onClick={() => changeZoom(1)}>100%</button>
       <button aria-pressed={mode === "page"} onClick={() => fit("page")}>Fit to page</button>
       <button aria-pressed={mode === "width"} onClick={() => fit("width")}>Fit to width</button>
       </div>
 
     </div>
-    <footer id="pan-hint">{placing ? 'Click the page to place the legend. Escape cancels.' : pointerPlacement ? 'Click a target on the note page. Escape cancels.' : tool === 'pan' ? 'Drag the plan to move the view' : tool === 'text' ? 'Click the page, type your note, then Apply text' : tool === 'arrow' ? 'Drag from the start to the arrow target' : tool === 'edit' ? currentShape ? 'Drag to move; handles resize; arrow keys nudge' : 'Click or choose a stroke to edit · Drag to move · Escape clears selection' : tool === 'highlight' ? 'Drag to highlight · Shift for straight line' : 'Drag a shape; Shift constrains; select to move or resize'} · Space + drag to pan · Ctrl + wheel to zoom</footer>
   </div>;
 }

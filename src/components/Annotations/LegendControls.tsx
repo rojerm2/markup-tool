@@ -27,12 +27,14 @@ export default function LegendControls({ session, dispatch }: { session: Annotat
   return <section className="legend-controls" aria-label="Legends">
     <div className="legend-bar">
       <button aria-expanded={expanded} aria-controls={formId} onClick={() => setExpanded(!expanded)}>Legends ({session.legends.length})</button>
+      <button aria-pressed={!active} onClick={() => dispatch({ type: 'select', id: null })}>Unassigned</button>
+      <div className="legend-drawing">
       <span className="legend-drawing-label">New strokes:</span>
       <output aria-label="Active legend" className="legend-active">
         {active && <span className="legend-dot" style={{ background: active.color }} />}
         {active ? `Active: ${active.name}` : 'Unassigned · Manual color'}
       </output>
-      <button aria-pressed={!active} onClick={() => dispatch({ type: 'select', id: null })}>Unassigned</button>
+      </div>
     </div>
     {expanded && <div id={formId} className="legend-editor">
       <div className="legend-list">

@@ -26,5 +26,19 @@ it('successful worker writes captured bytes/identity/project and releases worker
  const terminate=vi.fn();vi.stubGlobal('Worker',class {onmessage:((event:unknown)=>void)|null=null;onerror=null;terminate=terminate;postMessage(){queueMicrotask(()=>this.onmessage?.({data:{bytes:new Uint8Array([37,80,68,70])}}));}});
  vi.mocked(save).mockResolvedValue('C:/marked.pdf');vi.mocked(invoke).mockResolvedValueOnce(new Uint8Array([1,2]).buffer).mockResolvedValueOnce(undefined);
  expect(await exportPdf(source.reference,'C:/work.pmarkup',source,emptySession,new AbortController().signal)).toBe('C:/marked.pdf');
- expect(invoke).toHaveBeenLastCalledWith('write_export',expect.objectContaining({path:'C:/marked.pdf',projectPath:'C:/work.pmarkup',bytes:[37,80,68,70],sha256:source.sha256}));expect(terminate).toHaveBeenCalledOnce();
+ expect(invoke).toHaveBeenLastCalledWith('write_export',new Uint8Array([37,80,68,70]),expect.objectContaining({headers:{'x-export-metadata':JSON.stringify({sourcePath:source.reference,size:10,sha256:source.sha256,path:'C:/marked.pdf',projectPath:'C:/work.pmarkup'})}}));expect(terminate).toHaveBeenCalledOnce();
+});
+
+it('reports worker progress without terminating it and preserves Unicode paths in binary export metadata',async()=>{
+ const progress=vi.fn(), terminate=vi.fn();
+ vi.stubGlobal('Worker',class {onmessage:((event:unknown)=>void)|null=null;onerror=null;terminate=terminate;postMessage(){queueMicrotask(()=>{this.onmessage?.({data:{progress:'Preparing pages…'}});expect(terminate).not.toHaveBeenCalled();this.onmessage?.({data:{bytes:new Uint8Array([37,80,68,70])}});});}});
+ vi.mocked(save).mockResolvedValue('C:/图纸/plan😀.pdf');vi.mocked(invoke).mockResolvedValueOnce(new Uint8Array([1,2]).buffer).mockResolvedValueOnce(undefined);
+ await exportPdf('C:/图纸/original.pdf',null,source,emptySession,new AbortController().signal,progress);
+ const call=vi.mocked(invoke).mock.calls.at(-1)!;
+ expect(call[1]).toBeInstanceOf(Uint8Array);
+ const metadata=(call[2]?.headers as Record<string,string>)['x-export-metadata'];
+ expect(metadata).toMatch(/^[\x20-\x7e]+$/);
+ expect(JSON.parse(metadata)).toMatchObject({path:'C:/图纸/plan😀.pdf',sourcePath:'C:/图纸/original.pdf'});
+ expect(progress.mock.calls.flat()).toEqual(['Reading PDF…','Preparing pages…','Saving PDF…']);
+ expect(terminate).toHaveBeenCalledOnce();
 });

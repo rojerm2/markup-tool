@@ -4,6 +4,7 @@ import { newPageLegend, type PageLegend } from '../../services/pageLegend';
 import type { AnnotationSession, SessionAction } from '../../services/annotationSession';
 import type { SessionHistory } from '../../services/sessionHistory';
 import { isEditingControl } from '../../services/annotationEditing';
+import { isSpaceKey } from '../../services/canvasFocus';
 import PageLegendGraphic from './PageLegendGraphic';
 
 export default function PageLegendOverlay({rows,page,viewport,session,history,placing,onPlaced,selected,onSelect,dispatch,editing,disabled,revision}: {
@@ -21,7 +22,7 @@ export default function PageLegendOverlay({rows,page,viewport,session,history,pl
   useEffect(()=>{cancel();},[placing,editing,disabled,revision,viewport.width,viewport.height]);
   useEffect(()=>{if(move.current && (!session.pageLegends?.includes(move.current.before)||move.current.legends!==session.legends||selected!==move.current.before.id))cancel();},[session,selected]);
   useEffect(()=>{
-    const key=(e:KeyboardEvent)=>{if(e.key==='Escape'||(e.code==='Space'&&!isEditingControl(e.target)))cancel();};
+    const key=(e:KeyboardEvent)=>{if(e.key==='Escape'||(isSpaceKey(e)&&!isEditingControl(e.target)))cancel();};
     const hidden=()=>{if(document.hidden)cancel();};
     window.addEventListener('keydown',key);window.addEventListener('blur',cancel);window.addEventListener('scroll',cancel,true);document.addEventListener('visibilitychange',hidden);
     return ()=>{cancel();window.removeEventListener('keydown',key);window.removeEventListener('blur',cancel);window.removeEventListener('scroll',cancel,true);document.removeEventListener('visibilitychange',hidden);};

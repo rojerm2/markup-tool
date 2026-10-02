@@ -5,7 +5,8 @@ import { highlightOutline } from './highlightGeometry';
 import fontkit from '@pdf-lib/fontkit';
 import fontUrl from '../assets/LegendSans.ttf?url';
 import { keyMatrix, layoutLegend, legendTextError, textWidth } from './pageLegend';
-import { PDFDocument, PDFNumber } from 'pdf-lib';
+import { PDFDocument, PDFNumber, ParseSpeeds } from 'pdf-lib';
+import type { ExportProgress } from './exportService';
 import type { AnnotationSession } from './annotationSession';
 import { highlightGroups } from './annotationEditing';
 
@@ -17,8 +18,11 @@ export function pdfNumber(value: number): string {
 
 /** Original pages remain vectors. Coordinates are already raw PDF user space:
  * the page itself applies CropBox, Rotate and UserUnit exactly once. */
-export async function generateAnnotatedPdf(source: Uint8Array, session: AnnotationSession, fontBytes?: Uint8Array): Promise<Uint8Array> {
-  const pdf = await PDFDocument.load(source, { updateMetadata: false });
+export async function generateAnnotatedPdf(source: Uint8Array, session: AnnotationSession, fontBytes?: Uint8Array, onProgress?: (stage: ExportProgress) => void): Promise<Uint8Array> {
+  onProgress?.('Preparing pages…');
+  // This work runs in a dedicated worker. Per-object timer yields throttle large
+  // CAD PDFs without helping the UI; the main thread remains responsive.
+  const pdf = await PDFDocument.load(source, { updateMetadata: false, parseSpeed: ParseSpeeds.Fastest });
   const context = pdf.context;
   const notes=session.notes??[];
   if(!validNotes(notes,[],pdf.getPageCount()))throw new Error('Invalid note or arrow data.');
@@ -31,6 +35,7 @@ export async function generateAnnotatedPdf(source: Uint8Array, session: Annotati
     const strokes = byPage.get(stroke.page) ?? [];
     strokes.push(stroke); byPage.set(stroke.page, strokes);
   }
+  onProgress?.('Adding markup…');
   for (const [index, page] of pdf.getPages().entries()) {
     const strokes = byPage.get(index + 1) ?? [];
     const pageKeys=keys.filter(k=>k.page===index+1);
@@ -128,5 +133,6 @@ export async function generateAnnotatedPdf(source: Uint8Array, session: Annotati
     page.node.addContentStream(context.register(context.flateStream(commands.join('\n'))));
   }
   // Transparency requires PDF 1.4; pdf-lib writes a 1.7 header.
-  return pdf.save();
+  onProgress?.('Building PDF…');
+  return pdf.save({ objectsPerTick: Infinity });
 }

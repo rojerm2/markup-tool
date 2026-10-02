@@ -3,6 +3,7 @@ import { clientToPdf, pdfToClient, pdfToViewport, pdfWidthToViewport, type PageV
 import { constrainedPoint, moveShape, pickShape, resizeShape, shapeHandles, shapePath, validShape, type Shape, type ShapeKind } from '../../services/shapes';
 import { svgPath } from '../../services/highlightGeometry';
 import { isEditingControl } from '../../services/annotationEditing';
+import { isSpaceKey } from '../../services/canvasFocus';
 import type { SessionHistory } from '../../services/sessionHistory';
 import type { SessionAction } from '../../services/annotationSession';
 
@@ -30,7 +31,7 @@ export default function ShapeOverlay({page,viewport,shapes,tool,style,selected,o
     setPreview(g.preview);
   }
   useEffect(()=>{
-    const key=(e:KeyboardEvent)=>{if(e.key==='Escape'||e.code==='Space'&&!isEditingControl(e.target))cancel();else if(e.key==='Shift'&&gesture.current)update(gesture.current.last,e.type==='keydown');};
+    const key=(e:KeyboardEvent)=>{if(e.key==='Escape'||isSpaceKey(e)&&!isEditingControl(e.target))cancel();else if(e.key==='Shift'&&gesture.current)update(gesture.current.last,e.type==='keydown');};
     const hidden=()=>{if(document.hidden)cancel();};
     window.addEventListener('keydown',key);window.addEventListener('keyup',key);window.addEventListener('blur',cancel);window.addEventListener('scroll',cancel,true);document.addEventListener('visibilitychange',hidden);
     return()=>{cancel();window.removeEventListener('keydown',key);window.removeEventListener('keyup',key);window.removeEventListener('blur',cancel);window.removeEventListener('scroll',cancel,true);document.removeEventListener('visibilitychange',hidden);};

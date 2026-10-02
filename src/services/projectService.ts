@@ -39,7 +39,8 @@ export async function resolveSource(projectPath: string, reference: string) {
   return invoke<string | null>('resolve_source', { projectPath, reference });
 }
 export async function writeProject(path: string | null, sourcePath: string, text: string) {
-  const destination = path ?? await save({ title: 'Save editable project', defaultPath: 'Untitled.pmarkup', filters: projectFilters });
+  const filename = parseProject(text).source.filename.split(/[\\/]/).pop()!;
+  const destination = path ?? await save({ title: 'Save editable project', defaultPath: filename.replace(/\.pdf$/i, '') + '.pmarkup', filters: projectFilters });
   if (!destination) return null;
   await invoke('write_project', { path: destination, sourcePath, text });
   return destination;

@@ -3,6 +3,7 @@ import { clientToPdf, pdfToClient, pdfToViewport, type Point, type PageViewport 
 import { ARROW_DEFAULTS, TEXT_DEFAULTS, fitNote, moveNote, noteLocal, notePoint, validNote, type NoteObject, type TextNote } from '../../services/notes';
 import { constrainedPoint } from '../../services/shapes';
 import { isEditingControl } from '../../services/annotationEditing';
+import { isSpaceKey } from '../../services/canvasFocus';
 import type { SessionHistory } from '../../services/sessionHistory';
 import type { SessionAction } from '../../services/annotationSession';
 import NoteGraphic from './NoteGraphic';
@@ -20,7 +21,7 @@ export default function NoteOverlay({page,viewport,notes,tool,selected,pointer,p
   useEffect(()=>history.subscribeSnapshotCancellation(cancel),[history]);
   useEffect(()=>{cancel();},[tool,placing,disabled,revision,viewport.width,viewport.height,...(viewport.transform??[])]);
   useEffect(()=>{if(gesture.current?.before&&!notes.includes(gesture.current.before))cancel();},[notes]);
-  useEffect(()=>{const key=(e:KeyboardEvent)=>{if(e.key==='Escape'||e.code==='Space'&&!isEditingControl(e.target))cancel();};
+  useEffect(()=>{const key=(e:KeyboardEvent)=>{if(e.key==='Escape'||isSpaceKey(e)&&!isEditingControl(e.target))cancel();};
     document.addEventListener('visibilitychange',cancel);window.addEventListener('keydown',key);window.addEventListener('blur',cancel);window.addEventListener('scroll',cancel,true);
     return()=>{cancel();document.removeEventListener('visibilitychange',cancel);window.removeEventListener('keydown',key);window.removeEventListener('blur',cancel);window.removeEventListener('scroll',cancel,true);};},[]);
   function update(client:Point,shift:boolean,force=false){

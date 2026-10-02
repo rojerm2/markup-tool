@@ -7,6 +7,8 @@ import { highlightGroups, isEditingControl, pickHighlight, translatedHighlight }
 import type { Legend, SessionAction } from '../../services/annotationSession';
 
 import type { SessionHistory } from '../../services/sessionHistory';
+import { constrainedPoint } from '../../services/shapes';
+import { isSpaceKey } from '../../services/canvasFocus';
 
 type Props = { page: number; viewport: PageViewport; annotations: Highlight[]; onCommit: (stroke: Highlight, generation?: number) => void; style?: DrawingStyle; legendId?: string | null;
   tool?: 'highlight' | 'edit'; selectedId?: string | null; onSelect?: (id: string | null) => void;
@@ -16,6 +18,7 @@ const NO_LEGENDS: Legend[] = [];
 export default function AnnotationOverlay({ page, viewport, annotations, onCommit, style = DEFAULT_DRAWING, legendId = null,
   tool = 'highlight', selectedId = null, onSelect, onAction, legends = NO_LEGENDS, disabled = false, viewRevision = 0, history }: Props) {
   const svg = useRef<SVGSVGElement>(null);
+  const currentViewport = useRef(viewport); currentViewport.current = viewport;
   const draft = useRef<{ pointer: number; generation?: number; stroke: Highlight; samples: Point[] } | null>(null);
   const move = useRef<{ pointer: number; generation?: number; before: Highlight; start: Point; client: Point; legends: Legend[]; preview: Highlight | null } | null>(null);
   const [preview, setPreview] = useState<Highlight | null>(null);
@@ -30,8 +33,12 @@ export default function AnnotationOverlay({ page, viewport, annotations, onCommi
   useEffect(() => {
     const surface = svg.current;
     const key = (event: KeyboardEvent) => {
-      if ((event.code === 'Space' && !isEditingControl(event.target)) || event.code === 'Escape') cancel();
-      if (event.key === 'Shift') projectDraft(event.type === 'keydown');
+      if ((isSpaceKey(event) && !isEditingControl(event.target)) || event.key === 'Escape' || event.code === 'Escape') cancel();
+      if (event.key === 'Shift' || event.key === 'Control') {
+        const shift = event.key === 'Shift' ? event.type === 'keydown' : event.shiftKey;
+        const ctrl = event.key === 'Control' ? event.type === 'keydown' : event.ctrlKey;
+        projectDraft(shift, ctrl);
+      }
     };
     const hidden = () => { if (document.hidden) cancel(); };
     window.addEventListener('keydown', key);
@@ -63,12 +70,14 @@ export default function AnnotationOverlay({ page, viewport, annotations, onCommi
     return clientToPdf({ x: Math.max(rect.left, Math.min(rect.right, event.clientX)),
       y: Math.max(rect.top, Math.min(rect.bottom, event.clientY)) }, rect, viewport);
   }
-  function projectDraft(straight: boolean) {
+  function projectDraft(straight: boolean, snap = false) {
     const active = draft.current;
     if (!active) return;
     const samples = active.samples;
+    let end = samples[samples.length - 1];
+    if (straight && snap && svg.current) end = constrainedPoint(samples[0], end, 'line', true, svg.current.getBoundingClientRect(), currentViewport.current);
     active.stroke = { ...active.stroke, points: straight && samples.length > 1
-      ? [samples[0], samples[samples.length - 1]] : [...samples] };
+      ? [samples[0], end] : [...samples] };
     setPreview(active.stroke);
   }
   function append(event: PointerEvent<SVGSVGElement>) {
@@ -76,7 +85,7 @@ export default function AnnotationOverlay({ page, viewport, annotations, onCommi
     if (!active || active.pointer !== event.pointerId) return;
     const next = point(event), last = active.samples[active.samples.length - 1];
     if (next.x !== last.x || next.y !== last.y) active.samples.push(next);
-    projectDraft(event.shiftKey);
+    projectDraft(event.shiftKey, event.ctrlKey);
   }
   function appendMove(event: PointerEvent<SVGSVGElement>) {
     const active = move.current;
@@ -92,7 +101,7 @@ export default function AnnotationOverlay({ page, viewport, annotations, onCommi
   return <svg ref={svg} className={`annotation-overlay ${tool === 'edit' ? 'is-editing' : ''}`} aria-label={`Highlights for page ${page}`}
     width={viewport.width} height={viewport.height} viewBox={`0 0 ${viewport.width} ${viewport.height}`}
     onPointerDown={event => {
-      if (disabled || event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || draft.current || move.current) return;
+      if (disabled || event.button !== 0 || (event.ctrlKey && !(event.shiftKey && tool === 'highlight')) || event.metaKey || event.altKey || draft.current || move.current) return;
       event.preventDefault();
       if (tool === 'edit') {
         const hit = pickHighlight(annotations, { x: event.clientX, y: event.clientY }, event.currentTarget.getBoundingClientRect(), viewport);

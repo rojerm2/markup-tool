@@ -53,7 +53,7 @@ it('opens a bundled project without a PDF picker, preserves its filename and exp
   expect(parseProject(saved[2]).source.filename).toBe(source.filename);
   click('Export Annotated PDF'); await idle();
   expect(exports.exportPdf).toHaveBeenCalledWith(cached, 'C:\\plans\\one.pmarkup',
-    expect.objectContaining({filename:source.filename}), expect.anything(), expect.any(AbortSignal));
+    expect.objectContaining({filename:source.filename}), expect.anything(), expect.any(AbortSignal), expect.any(Function));
 });
 it('first Save, subsequent Save, Save As, reopen and continued legend edits preserve stable state', async () => {
   render(<App />); await openPdf(); create(); click('Thick');
@@ -300,6 +300,10 @@ it('export snapshots committed state while edits/history continue and locks othe
   const pendingExport = deferred<string|null>(); vi.mocked(exports.exportPdf).mockReturnValueOnce(pendingExport.promise);
   click('Export Annotated PDF');
   const args = vi.mocked(exports.exportPdf).mock.calls[0];
+  act(() => args[5]?.('Building PDF…'));
+  expect(status()).toContain('Building PDF…');
+  act(() => args[5]?.('Saving PDF…'));
+  expect(status()).toContain('Saving PDF…');
   expect(args[1]).toContain('one.pmarkup'); expect(args[3].drawing.width).toBe(20);
   click('Undo'); click('Thin'); click('Redo');
   expect(screen.getByRole('button',{name:'Open PDF'}).hasAttribute('disabled')).toBe(true);
@@ -356,5 +360,19 @@ it('persists Larger controls locally without changing saved data, dirty state or
   expect(screen.getByRole('button',{name:'Undo',exact:true}).hasAttribute('disabled')).toBe(true);
   click('Save Project');await idle();expect(vi.mocked(files.writeProject).mock.calls.at(-1)![2]).toBe(before);
   view.unmount();render(<App/>);expect((screen.getByLabelText('Larger controls') as HTMLInputElement).checked).toBe(true);
+  localStorage.clear();
+});
+
+it('keeps appearance and audio preferences separate from projects and restores them after reopening the app', async () => {
+  localStorage.clear(); const view = render(<App />); await openPdf(); click('Save Project'); await idle();
+  const before = vi.mocked(files.writeProject).mock.calls.at(-1)![2];
+  expect((screen.getByLabelText('Action sounds') as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(screen.getByLabelText('Dark mode')); fireEvent.click(screen.getByLabelText('Action sounds'));
+  expect(document.documentElement.dataset.theme).toBe('dark');
+  expect(status()).not.toContain('Unsaved changes'); expect(screen.getByRole('button', { name: 'Undo', exact: true }).hasAttribute('disabled')).toBe(true);
+  click('Save Project'); await idle(); expect(vi.mocked(files.writeProject).mock.calls.at(-1)![2]).toBe(before);
+  view.unmount(); render(<App />);
+  expect((screen.getByLabelText('Dark mode') as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByLabelText('Action sounds') as HTMLInputElement).checked).toBe(true);
   localStorage.clear();
 });

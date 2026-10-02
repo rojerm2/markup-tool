@@ -1,6 +1,7 @@
 import ToolIcon from './components/Toolbar/ToolIcon';
 import './App.css';
-import { readLargerControls, writeLargerControls } from './services/uiPreferences';
+import { readLargerControls, writeLargerControls, readTheme, writeTheme, readSoundsEnabled, writeSoundsEnabled, type Theme } from './services/uiPreferences';
+import { configureActionSounds, listenForControlSounds, playActionSound } from './services/actionSounds';
 import { useEffect, useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -28,12 +29,26 @@ function DirtyDialog({ answer }: { answer: (choice: Choice) => void }) {
 }
 export default function App() {
   const [largerControls, setLargerControls] = useState(readLargerControls);
+  const [theme, setTheme] = useState<Theme>(readTheme);
+  const [sounds, setSounds] = useState(readSoundsEnabled);
+  const appRoot = useRef<HTMLElement>(null);
+  const preferences = useRef<HTMLDetailsElement>(null);
+  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+  useEffect(() => { configureActionSounds(sounds); }, [sounds]);
+  useEffect(() => { if (appRoot.current) return listenForControlSounds(appRoot.current); }, []);
+  useEffect(() => {
+    const outside = (event: PointerEvent) => { if (event.target instanceof Node && !preferences.current?.contains(event.target) && preferences.current) preferences.current.open = false; };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape' && preferences.current?.open) { preferences.current.open = false; if (event.target instanceof Node && preferences.current.contains(event.target)) preferences.current.querySelector('summary')?.focus(); } };
+    window.addEventListener('pointerdown', outside); window.addEventListener('keydown', escape);
+    return () => { window.removeEventListener('pointerdown', outside); window.removeEventListener('keydown', escape); };
+  }, []);
   const [work, setWork] = useState<Work | null>(null);
   const live = useRef<Work | null>(null), counter = useRef(0), locked = useRef(false), alive = useRef(true);
   const staging = useRef<AbortController | null>(null);
   const replacing = useRef(false);
   const [operation, setOperation] = useState<'opening' | 'saving' | 'exporting' | 'closing' | null>(null);
   const [error, setError] = useState<string | null>(null), [notice, setNotice] = useState<string | null>(null);
+  const [exportProgress, setExportProgress] = useState('Exporting…');
   const [question, setQuestion] = useState(false);
   const pending = useRef<((choice: Choice) => void) | null>(null);
   const dirty = (value: Work | null) => !!value && JSON.stringify(value.session) !== value.saved;
@@ -60,6 +75,7 @@ export default function App() {
     const path = await writeProject(as ? null : snapshot.projectPath, snapshot.sourcePath, serialized);
     if (!path || !alive.current || live.current?.id !== snapshot.id) return false;
     publish({ ...live.current, projectPath: path, saved });
+    playActionSound('success');
     return !dirty(live.current);
   }
   async function guard() {
@@ -75,7 +91,7 @@ export default function App() {
     if (replacing.current) live.current?.history.invalidate();
     setOperation(kind); setError(null); setNotice(null);
     try { await task(); }
-    catch (err) { if (alive.current) setError(`${err instanceof Error ? err.message : String(err)} Please retry or choose another file.`); }
+    catch (err) { if (alive.current) { playActionSound('error'); setError(`${err instanceof Error ? err.message : String(err)} Please retry or choose another file.`); } }
     finally { locked.current = false; replacing.current = false; if (alive.current) { setOperation(null); if (kind !== 'exporting') setNotice(null); } }
   }
   async function exportCurrent() {
@@ -83,10 +99,13 @@ export default function App() {
       const snapshot = live.current;
       if (!snapshot) return;
       snapshot.history.invalidate();
+      setExportProgress('Choosing destination…');
       const path = await exportPdf(snapshot.sourcePath, snapshot.projectPath, snapshot.source,
-        snapshot.session, snapshot.controller.signal);
-      if (path && alive.current && live.current?.id === snapshot.id)
+        snapshot.session, snapshot.controller.signal, setExportProgress);
+      if (path && alive.current && live.current?.id === snapshot.id) {
         setNotice(`Exported ${path.split(/[\\/]/).pop()}. Editable project unchanged.`);
+        playActionSound('success');
+      }
     });
   }
   async function openWork(projectMode: boolean) {
@@ -111,6 +130,7 @@ export default function App() {
           ...loaded, source: { ...loaded.source, filename: selected?.project.source.filename ?? loaded.source.filename },
           session, history: new SessionHistory(session), saved: JSON.stringify(session), controller });
         staging.current = null;
+        playActionSound('success');
         previous?.controller.abort();
       } finally { if (staging.current === controller) { controller.abort(); staging.current = null; } }
     });
@@ -130,7 +150,7 @@ export default function App() {
     return () => { disposed = true; alive.current = false; unlisten?.(); window.removeEventListener('beforeunload', beforeUnload);
       staging.current?.abort(); live.current?.controller.abort(); pending.current?.('cancel'); pending.current = null; };
   }, []);
-  return <main className={`app-shell${largerControls ? ' larger-controls' : ''}`}>
+  return <main ref={appRoot} className={`app-shell${largerControls ? ' larger-controls' : ''}`}>
     <header className="app-header"><h1><span className="app-mark"><ToolIcon name="file" /></span> PDF Markup</h1>
       <div className="project-actions" role="toolbar" aria-label="Project files">
         <button disabled={!!operation} onClick={() => void openWork(false)}>Open PDF</button>
@@ -138,8 +158,13 @@ export default function App() {
         <button className="save-action" title="Save the PDF and editable annotations together in one project" disabled={!work || !!operation} onClick={() => void run('saving', async () => { await saveCurrent(); })}>Save Project</button>
         <button disabled={!work || !!operation} onClick={() => void run('saving', async () => { await saveCurrent(true); })}>Save As</button>
         <button className="primary-action" disabled={!work || !!operation} onClick={() => void exportCurrent()}>Export Annotated PDF</button>
-      </div><label className="size-preference"><input type="checkbox" checked={largerControls} onChange={e => { setLargerControls(e.target.checked); writeLargerControls(e.target.checked); }} />Larger controls</label></header>
-    <p className="document-name" role="status">{work ? `${work.projectPath?.split(/[\\/]/).pop() ?? 'Unsaved project'} · PDF: ${work.source.filename} · ${dirty(work) ? 'Unsaved changes' : work.projectPath ? 'Saved' : 'Ready to save'}` : 'Open a PDF or an editable project.'}{operation && ` · ${operation === 'exporting' ? 'Exporting...' : operation === 'saving' ? 'Saving…' : operation === 'opening' ? 'Opening…' : 'Closing…'}`}{!operation && notice && ` | ${notice}`}</p>
+      </div><details ref={preferences} className="ui-preferences"><summary>Preferences</summary><div className="preferences-popover">
+        <label><input type="checkbox" checked={theme === 'dark'} onChange={e => { const value = e.target.checked ? 'dark' : 'light'; setTheme(value); writeTheme(value); }} />Dark mode</label>
+        <label><input type="checkbox" checked={largerControls} onChange={e => { setLargerControls(e.target.checked); writeLargerControls(e.target.checked); }} />Larger controls</label>
+        <label><input type="checkbox" checked={sounds} onChange={e => { setSounds(e.target.checked); writeSoundsEnabled(e.target.checked); configureActionSounds(e.target.checked); }} />Action sounds</label>
+        <small>Quiet cues for controls, markup, undo/redo, and file actions.</small>
+      </div></details></header>
+    <p className="document-name" role="status">{work ? `${work.projectPath?.split(/[\\/]/).pop() ?? 'Unsaved project'} · PDF: ${work.source.filename} · ${dirty(work) ? 'Unsaved changes' : work.projectPath ? 'Saved' : 'Ready to save'}` : 'Open a PDF or an editable project.'}{operation && ` · ${operation === 'exporting' ? exportProgress : operation === 'saving' ? 'Saving…' : operation === 'opening' ? 'Opening…' : 'Closing…'}`}{!operation && notice && ` | ${notice}`}</p>
     {error && <p role="alert" className="project-error">{error}</p>}
     {operation && notice && <p role="status" className="document-name">{notice}</p>}
     <div className="project-workspace" inert={operation === 'opening' || operation === 'closing'}>

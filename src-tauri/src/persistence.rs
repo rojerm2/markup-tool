@@ -1,11 +1,11 @@
+use crate::portable;
 use std::{
     fs::File,
     io::{Read, Write},
     path::{Path, PathBuf},
 };
-use tauri_plugin_fs::FsExt;
 use tauri::Manager;
-use crate::portable;
+use tauri_plugin_fs::FsExt;
 
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
 fn allowed(app: &tauri::AppHandle, path: &Path) -> Result<(), String> {
@@ -19,7 +19,8 @@ fn allowed(app: &tauri::AppHandle, path: &Path) -> Result<(), String> {
 pub async fn read_project(app: tauri::AppHandle, path: PathBuf) -> Result<String, String> {
     allowed(&app, &path)?;
     tauri::async_runtime::spawn_blocking(move || portable::read(&path, false).map(|(text, _)| text))
-        .await.map_err(|e| e.to_string())?
+        .await
+        .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 pub async fn resolve_source(
@@ -29,26 +30,30 @@ pub async fn resolve_source(
 ) -> Result<Option<String>, String> {
     allowed(&app, &project_path)?;
     tauri::async_runtime::spawn_blocking(move || {
-    if let Some(bytes) = portable::read(&project_path, true)?.1 {
-        let path = app.state::<portable::EmbeddedSources>().extract(&bytes)?;
-        // Only this generated file is authorized; embedded references never extend scope.
-        app.fs_scope().allow_file(&path).map_err(|e| e.to_string())?;
-        return Ok(Some(path.to_string_lossy().into_owned()));
-    }
-    let path = if reference.is_absolute() {
-        reference
-    } else {
-        project_path
-            .parent()
-            .ok_or("Project has no parent")?
-            .join(reference)
-    };
-    // A project reference never extends scope. A fresh launch uses Locate PDF.
-    if allowed(&app, &path).is_err() || !path.is_file() {
-        return Ok(None);
-    }
-    Ok(Some(path.to_string_lossy().into_owned()))
-    }).await.map_err(|e| e.to_string())?
+        if let Some(bytes) = portable::read(&project_path, true)?.1 {
+            let path = app.state::<portable::EmbeddedSources>().extract(&bytes)?;
+            // Only this generated file is authorized; embedded references never extend scope.
+            app.fs_scope()
+                .allow_file(&path)
+                .map_err(|e| e.to_string())?;
+            return Ok(Some(path.to_string_lossy().into_owned()));
+        }
+        let path = if reference.is_absolute() {
+            reference
+        } else {
+            project_path
+                .parent()
+                .ok_or("Project has no parent")?
+                .join(reference)
+        };
+        // A project reference never extends scope. A fresh launch uses Locate PDF.
+        if allowed(&app, &path).is_err() || !path.is_file() {
+            return Ok(None);
+        }
+        Ok(Some(path.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 fn checked_destination(path: &Path, source: &Path) -> Result<PathBuf, String> {
     if !path.is_absolute() {
@@ -82,7 +87,7 @@ fn checked_destination(path: &Path, source: &Path) -> Result<PathBuf, String> {
         {
             return Err("Cannot overwrite the source PDF".into());
         }
-        // Existing destinations must be project JSON. Signature sniffing can miss a
+        // Existing destinations must be a supported project. Signature sniffing can miss a
         // renamed PDF with a long prefix, or mistake a legend named "%PDF-" for one.
         if portable::read(&target, false).is_err() {
             return Err(
@@ -153,14 +158,20 @@ fn save_file(path: &Path, source: &Path, text: &str) -> Result<(), String> {
 }
 
 fn save_portable_file(path: &Path, source: &Path, text: &str) -> Result<(), String> {
-    if text.len() as u64 > MAX_BYTES { return Err("Project annotations exceed 16 MiB".into()); }
+    if text.len() as u64 > MAX_BYTES {
+        return Err("Project annotations exceed 16 MiB".into());
+    }
     let value = portable::envelope(text)?;
     let target = checked_destination(path, source)?;
     let size = value["source"]["size"].as_u64().ok_or("Missing PDF size")?;
-    let hash = value["source"]["sha256"].as_str().ok_or("Missing PDF hash")?;
+    let hash = value["source"]["sha256"]
+        .as_str()
+        .ok_or("Missing PDF hash")?;
     let pdf = verified_source(source, size, hash)?;
     let bytes = portable::encode(text, &pdf)?;
-    atomic_write(&target, &bytes, || checked_destination(&target, source).map(|_| ()))
+    atomic_write(&target, &bytes, || {
+        checked_destination(&target, source).map(|_| ())
+    })
 }
 
 // Export uses the same transactional sibling writer as editable projects.
@@ -201,7 +212,7 @@ fn verified_source(source: &Path, size: u64, sha256: &str) -> Result<Vec<u8>, St
     if file.metadata().map_err(|e| e.to_string())?.len() != size {
         return Err("Source PDF changed since opening".into());
     }
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(size as usize);
     file.take(MAX_PDF_BYTES + 1)
         .read_to_end(&mut bytes)
         .map_err(|e| e.to_string())?;
@@ -209,6 +220,35 @@ fn verified_source(source: &Path, size: u64, sha256: &str) -> Result<Vec<u8>, St
         return Err("Source PDF changed since opening (SHA-256 mismatch)".into());
     }
     Ok(bytes)
+}
+
+// Recheck the source before an atomic export without allocating another entire
+// PDF. Preserve the same byte count/hash checks used when opening the source.
+fn verify_source_identity(source: &Path, size: u64, sha256: &str) -> Result<(), String> {
+    use sha2::{Digest, Sha256};
+    if size == 0 || size > MAX_PDF_BYTES {
+        return Err("Export supports source PDFs up to 256 MiB".into());
+    }
+    let file = File::open(source).map_err(|e| format!("Cannot read source PDF: {e}"))?;
+    if file.metadata().map_err(|e| e.to_string())?.len() != size {
+        return Err("Source PDF changed since opening".into());
+    }
+    let mut reader = file.take(MAX_PDF_BYTES + 1);
+    let mut hash = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    let mut count = 0u64;
+    loop {
+        let read = reader.read(&mut buffer).map_err(|e| e.to_string())?;
+        if read == 0 {
+            break;
+        }
+        count += read as u64;
+        hash.update(&buffer[..read]);
+    }
+    if count != size || format!("{:x}", hash.finalize()) != sha256 {
+        return Err("Source PDF changed since opening (SHA-256 mismatch)".into());
+    }
+    Ok(())
 }
 #[tauri::command]
 pub async fn read_export_source(
@@ -276,22 +316,61 @@ fn export_file(
         return Err("Invalid or oversized export (256 MiB limit)".into());
     }
     let target = export_destination(path, source, project)?;
-    verified_source(source, size, sha256)?;
+    verify_source_identity(source, size, sha256)?;
     atomic_write(&target, bytes, || {
         export_destination(&target, source, project)?;
-        verified_source(source, size, sha256).map(|_| ())
+        verify_source_identity(source, size, sha256)
     })
 }
-#[tauri::command]
-pub async fn write_export(
-    app: tauri::AppHandle,
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ExportOptions {
     path: PathBuf,
     source_path: PathBuf,
     project_path: Option<PathBuf>,
     size: u64,
     sha256: String,
-    bytes: Vec<u8>,
+}
+
+fn decode_export_request(
+    body: &tauri::ipc::InvokeBody,
+    metadata: &str,
+) -> Result<(ExportOptions, Vec<u8>), String> {
+    if metadata.len() > 32 * 1024 {
+        return Err("Export metadata exceeds 32 KiB".into());
+    }
+    let options =
+        serde_json::from_str(metadata).map_err(|e| format!("Invalid export metadata: {e}"))?;
+    let tauri::ipc::InvokeBody::Raw(bytes) = body else {
+        return Err("Export requires binary PDF bytes".into());
+    };
+    if bytes.len() as u64 > MAX_PDF_BYTES || !bytes.starts_with(b"%PDF-") {
+        return Err("Invalid or oversized export (256 MiB limit)".into());
+    }
+    Ok((options, bytes.clone()))
+}
+
+#[tauri::command]
+pub async fn write_export(
+    app: tauri::AppHandle,
+    request: tauri::ipc::Request<'_>,
 ) -> Result<(), String> {
+    let metadata = request
+        .headers()
+        .get("x-export-metadata")
+        .ok_or("Missing export metadata")?
+        .to_str()
+        .map_err(|e| e.to_string())?;
+    let (
+        ExportOptions {
+            path,
+            source_path,
+            project_path,
+            size,
+            sha256,
+        },
+        bytes,
+    ) = decode_export_request(request.body(), metadata)?;
     allowed(&app, &path)?;
     allowed(&app, &source_path)?;
     if let Some(project) = &project_path {
@@ -316,6 +395,36 @@ mod tests {
     use super::*;
     use std::fs;
     #[test]
+    fn binary_export_request_validates_metadata_and_body() {
+        let metadata = r#"{"path":"C:/\u56fe\u7eb8/marked.pdf","sourcePath":"C:/original.pdf","projectPath":null,"size":10,"sha256":"hash"}"#;
+        let body = tauri::ipc::InvokeBody::Raw(b"%PDF-output".to_vec());
+        let (options, bytes) = decode_export_request(&body, metadata).unwrap();
+        assert_eq!(options.path, PathBuf::from("C:/图纸/marked.pdf"));
+        assert_eq!(bytes, b"%PDF-output");
+        assert!(decode_export_request(
+            &tauri::ipc::InvokeBody::Json(serde_json::json!([37, 80, 68, 70])),
+            metadata
+        )
+        .is_err());
+        assert!(decode_export_request(&tauri::ipc::InvokeBody::Raw(vec![0]), metadata).is_err());
+        assert!(decode_export_request(&body, "{}").is_err());
+        assert!(decode_export_request(&body, &" ".repeat(32769)).is_err());
+    }
+
+    #[test]
+    fn streamed_identity_detects_same_size_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("source.pdf");
+        let bytes = vec![7u8; 1024 * 1024 + 3];
+        fs::write(&path, &bytes).unwrap();
+        let (size, hash) = identity(&bytes);
+        verify_source_identity(&path, size, &hash).unwrap();
+        let mut changed = bytes;
+        changed[64 * 1024] = 8;
+        fs::write(&path, changed).unwrap();
+        assert!(verify_source_identity(&path, size, &hash).is_err());
+    }
+    #[test]
     fn portable_save_reopen_resave_and_export_without_original() {
         let dir = tempfile::tempdir().unwrap();
         let source = dir.path().join("original.pdf");
@@ -325,7 +434,8 @@ mod tests {
         let (size, hash) = identity(pdf);
         let text = serde_json::json!({"format":"pdf-markup-project", "version":2,
             "source":{"reference":source,"filename":"original.pdf","size":size,"sha256":hash},
-            "session":{"notes":[{"text":"Keep this note"}]}}).to_string();
+            "session":{"notes":[{"text":"Keep this note"}]}})
+        .to_string();
         // Also upgrades an existing legacy JSON project in place.
         fs::write(&project, &text).unwrap();
         save_portable_file(&project, &source, &text).unwrap();
@@ -341,7 +451,15 @@ mod tests {
         save_portable_file(&copy, &embedded, &restored).unwrap();
         assert_eq!(portable::read(&copy, true).unwrap().1.unwrap(), pdf);
         let export = dir.path().join("annotated.pdf");
-        export_file(&export, &embedded, Some(&moved), size, &hash, b"%PDF-exported").unwrap();
+        export_file(
+            &export,
+            &embedded,
+            Some(&moved),
+            size,
+            &hash,
+            b"%PDF-exported",
+        )
+        .unwrap();
         assert_eq!(fs::read(export).unwrap(), b"%PDF-exported");
         // Failed identity verification must preserve the last good save.
         let previous = fs::read(&moved).unwrap();

@@ -1,8 +1,10 @@
 import type { AnnotationSession, SessionAction } from '../../services/annotationSession';
-import { COLORS, WIDTHS } from './DrawingControls';
+import { COLORS } from './DrawingControls';
+import WidthControl from './WidthControl';
+import type { SessionHistory } from '../../services/sessionHistory';
 
-export default function EditingControls({ session, selectedId, onSelect, dispatch }: {
-  session: AnnotationSession; selectedId: string | null; onSelect: (id: string | null) => void; dispatch: (action: SessionAction) => void;
+export default function EditingControls({ session, selectedId, onSelect, dispatch, history }: {
+  session: AnnotationSession; selectedId: string | null; onSelect: (id: string | null) => void; dispatch: (action: SessionAction) => void; history?: SessionHistory;
 }) {
   const stroke = session.annotations.find(s => s.id === selectedId);
   const edit = (value: Extract<SessionAction, { type: 'edit-stroke' }>['edit']) => {
@@ -17,10 +19,7 @@ export default function EditingControls({ session, selectedId, onSelect, dispatc
       <option value="">Unassigned</option>
       {session.legends.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
     </select></label>
-    <label>Width <select aria-label="Selected stroke width" disabled={!stroke} value={stroke?.width ?? 10} onChange={e => edit({ width: Number(e.target.value) })}>
-      {stroke && !WIDTHS.some(w => w.value === stroke.width) && <option value={stroke.width}>{stroke.width} PDF units</option>}
-      {WIDTHS.map(w => <option key={w.value} value={w.value}>{w.name}</option>)}
-    </select></label>
+    <WidthControl key={stroke.id} value={stroke.width} color={stroke.color} history={history} label="Selected stroke width" onChange={width => edit({ width })} />
     {COLORS.map(c => <button key={c.value} className="color-swatch" disabled={!stroke} aria-label={`Selected stroke ${c.name}`} aria-pressed={stroke?.color === c.value}
       onClick={() => edit({ color: c.value })}><span style={{ background: c.value }}>{stroke?.color === c.value ? '✓' : ''}</span>{c.name}</button>)}
     </>}

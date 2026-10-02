@@ -1,6 +1,6 @@
 import {afterEach,expect,it,vi} from 'vitest';
-import {readLargerControls,writeLargerControls} from '../src/services/uiPreferences';
-afterEach(()=>{vi.restoreAllMocks();localStorage.clear();});
+import {readLargerControls,writeLargerControls,readTheme,writeTheme,readSoundsEnabled,writeSoundsEnabled} from '../src/services/uiPreferences';
+afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();localStorage.clear();});
 it.each([null,'false','TRUE','{}','1','undefined'])('defaults safely for stored %s',value=>{
   if(value!==null)localStorage.setItem('pdf-markup.larger-controls',value);
   expect(readLargerControls()).toBe(false);
@@ -13,4 +13,12 @@ it('tolerates unavailable storage',()=>{
   vi.spyOn(Storage.prototype,'getItem').mockImplementation(()=>{throw new Error('blocked');});
   vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new Error('quota');});
   expect(readLargerControls()).toBe(false);expect(()=>writeLargerControls(true)).not.toThrow();
+});
+it('follows system appearance initially, persists an explicit theme, and defaults sound off', () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: true }));
+  expect(readTheme()).toBe('dark'); expect(readSoundsEnabled()).toBe(false);
+  writeTheme('light'); expect(readTheme()).toBe('light');
+  writeTheme('dark'); expect(readTheme()).toBe('dark');
+  writeSoundsEnabled(true); expect(readSoundsEnabled()).toBe(true);
+  writeSoundsEnabled(false); expect(readSoundsEnabled()).toBe(false);
 });

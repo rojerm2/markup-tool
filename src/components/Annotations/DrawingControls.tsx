@@ -1,3 +1,6 @@
+import WidthControl from './WidthControl';
+import type { SessionHistory } from '../../services/sessionHistory';
+
 export const COLORS = [
   { name: 'Yellow', value: '#facc15' },
   { name: 'Green', value: '#4ade80' },
@@ -16,11 +19,11 @@ export const WIDTHS = [{ name: 'Thin', value: 5 }, { name: 'Medium', value: 10 }
 export type DrawingStyle = { color: string; width: number; opacity: number; rounding?: number };
 export const DEFAULT_DRAWING: DrawingStyle = { color: COLORS[0].value, width: 10, opacity: 0.4 };
 
-export default function DrawingControls({ value, onChange }: { value: DrawingStyle; onChange: (value: DrawingStyle, manual: boolean) => void }) {
+export default function DrawingControls({ value, history, onChange }: { value: DrawingStyle; history?: SessionHistory; onChange: (value: DrawingStyle, manual: boolean) => void }) {
   return <div className="drawing-controls" role="toolbar" aria-label="Drawing controls">
     <span className="tool-status">New strokes</span>
     <div className="control-group" role="group" aria-label="Stroke width">
-      <span className="control-label">Width</span>
+      <WidthControl value={value.width} color={value.color} history={history} onChange={width => onChange({ ...value, width }, false)} />
       {WIDTHS.map(width => <button key={width.value} aria-pressed={value.width === width.value}
         title={`${width.value} PDF units`} onClick={() => onChange({ ...value, width: width.value }, false)}>{width.name}</button>)}
     </div>

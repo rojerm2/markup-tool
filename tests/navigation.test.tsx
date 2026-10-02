@@ -2,6 +2,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { PDFPageProxy } from "pdfjs-dist";
 import PdfNavigationView from "../src/components/PdfViewer/PdfNavigationView";
+import { SessionHistory } from '../src/services/sessionHistory';
+import { emptySession } from '../src/services/annotationSession';
 
 let width = 800, height = 600;
 let resize: () => void;
@@ -135,11 +137,12 @@ it("pans only with Space, captures the pointer and releases on keyup, blur and c
   }
   fireEvent.keyUp(window, { code: "Space" });
   fireEvent.keyDown(screen.getByRole("textbox"), { code: "Space" }); down();
-  expect(captured).toBeNull();
+  expect(captured).toBe(7); // Numeric page entry yields to canvas panning.
+  fireEvent.keyUp(window, { code: 'Space' });
 });
 
 
-it("preserves toolbar activation and pans from page focus", () => {
+it("preserves keyboard toolbar activation and pans from page focus", () => {
   render(<PdfNavigationView pages={[page(1)]} />);
   const host = screen.getByRole('region', { name: 'PDF pages' });
   const button = screen.getByRole('button', { name: '100%' });
@@ -155,7 +158,77 @@ it("preserves toolbar activation and pans from page focus", () => {
   fireEvent.pointerUp(overlay, { pointerId: 8 });
   expect(host.scrollLeft).toBe(100);
   expect(overlay.querySelector('polyline')).toBeNull();
-  expect(fireEvent.keyDown(screen.getByRole('textbox'), { code: 'Space' })).toBe(true);
+  expect(fireEvent.keyDown(screen.getByRole('textbox'), { code: 'Space' })).toBe(false);
+  fireEvent.keyUp(window, { code: 'Space' });
+});
+
+it.each(['100%', 'Highlight', 'Blue', 'Undo'])('pans immediately after a mouse click on %s without reactivating the button', name => {
+  render(<PdfNavigationView pages={[page(1)]} />);
+  const host = screen.getByRole('region', { name: 'PDF pages' });
+  const button = screen.getByRole('button', { name, exact: true });
+  // Undo needs a committed change so it is enabled when clicked.
+  if (name === 'Undo') fireEvent.click(screen.getByRole('button', { name: 'Thick' }));
+  button.focus(); fireEvent.click(button, { detail: 1 });
+  expect(document.activeElement).toBe(host);
+  const activated = vi.fn(); button.addEventListener('click', activated);
+  expect(fireEvent.keyDown(document.activeElement!, { code: 'Space' })).toBe(false);
+  expect(document.activeElement).toBe(host);
+  expect(host.className).toContain('can-pan');
+  const overlay = screen.getByLabelText('Highlights for page 1');
+  fireEvent.pointerDown(overlay, { pointerId: 8, button: 0, clientX: 300, clientY: 300 });
+  fireEvent.pointerMove(host, { pointerId: 8, buttons: 1, clientX: 200, clientY: 200 });
+  expect(host.scrollLeft).toBe(100);
+  expect(overlay.querySelector('polyline')).toBeNull();
+  expect(fireEvent.keyUp(button, { code: 'Space' })).toBe(false);
+  expect(captured).toBeNull(); expect(activated).not.toHaveBeenCalled();
+  // A completed pointer gesture can emit a click, clearing toolbar-click
+  // tracking. The next Space gesture must still work from actual focus.
+  fireEvent.click(host, { detail: 1 });
+  for (const id of [9, 10]) {
+    expect(fireEvent.keyDown(document.activeElement!, { code: 'Space' })).toBe(false);
+    expect(document.activeElement).toBe(host);
+    fireEvent.pointerDown(overlay, { pointerId: id, button: 0, clientX: 300, clientY: 300 });
+    fireEvent.pointerMove(host, { pointerId: id, buttons: 1, clientX: 250, clientY: 250 });
+    fireEvent.pointerUp(host, { pointerId: id });
+    fireEvent.click(host, { detail: 1 });
+    expect(fireEvent.keyUp(document.activeElement!, { code: 'Space' })).toBe(false);
+    expect(captured).toBeNull();
+    expect(host.className).not.toContain('can-pan');
+  }
+  expect(host.scrollLeft).toBe(200);
+  expect(overlay.querySelector('polyline')).toBeNull();
+  expect(activated).not.toHaveBeenCalled();
+  button.focus();
+  fireEvent.keyDown(button, { code: 'Tab' });
+  expect(fireEvent.keyDown(button, { code: 'Space' })).toBe(true);
+  expect(host.className).not.toContain('can-pan');
+});
+
+it('applies arbitrary highlight widths in one Undo step and discards drafts on Undo', () => {
+  render(<PdfNavigationView pages={[page(1)]} />);
+  const slider = screen.getByRole('slider', { name: 'Highlight width slider' });
+  const width = () => (screen.getByLabelText('Highlight width') as HTMLInputElement).value;
+  fireEvent.change(slider, { target: { value: '50' } });
+  fireEvent.change(slider, { target: { value: '100' } });
+  fireEvent.pointerUp(slider);
+  expect(width()).toBe('100');
+  fireEvent.click(screen.getByRole('button', { name: 'Undo', exact: true }));
+  expect(width()).toBe('10');
+  fireEvent.click(screen.getByRole('button', { name: 'Redo', exact: true }));
+  expect(width()).toBe('100');
+  fireEvent.change(slider, { target: { value: '0.25' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Undo', exact: true }));
+  fireEvent.pointerUp(slider);
+  expect(width()).toBe('10');
+  fireEvent.change(slider, { target: { value: '0.25' } });
+  fireEvent.pointerUp(slider);
+  const overlay = screen.getByLabelText('Highlights for page 1');
+  Object.defineProperty(overlay, 'getBoundingClientRect', { value: () => rect(0, 0, 600, 800) });
+  fireEvent.pointerDown(overlay, { pointerId: 8, button: 0, clientX: 300, clientY: 300 });
+  fireEvent.pointerMove(overlay, { pointerId: 8, buttons: 1, clientX: 400, clientY: 400 });
+  fireEvent.pointerUp(overlay, { pointerId: 8, clientX: 400, clientY: 400 });
+  expect(Number(overlay.querySelector('polyline')?.getAttribute('stroke-width'))).toBeGreaterThan(0);
+  expect(Number(overlay.querySelector('polyline')?.getAttribute('stroke-width'))).toBeLessThan(0.25);
 });
 
 it("cancels only Ctrl-wheel, anchors to the pointer and respects wheel zoom limits", () => {
@@ -386,4 +459,81 @@ it('closes a narrow drawer on a drawing tool choice and moves focus to the plan'
  fireEvent.click(screen.getByRole('button',{name:'Text',exact:true}));
  expect(screen.getByRole('button',{name:'Properties',exact:true}).getAttribute('aria-expanded')).toBe('false');
  expect(document.activeElement).toBe(screen.getByRole('region',{name:'PDF pages'}));
+});
+
+it('returns sliders and numeric fields to repeated Space panning while protecting actual text entry', () => {
+  render(<PdfNavigationView pages={[page(1)]} />);
+  const host = screen.getByRole('region', { name: 'PDF pages' }), slider = screen.getByLabelText('Highlight width slider');
+  slider.focus(); fireEvent.change(slider, { target: { value: '80' } }); fireEvent.pointerUp(slider);
+  expect(document.activeElement).toBe(host);
+  expect((screen.getByLabelText('Highlight width') as HTMLInputElement).value).toBe('80');
+  for (const input of [slider, screen.getByLabelText('Highlight width'), screen.getByLabelText('Page number')]) {
+    for (let i = 0; i < 2; i++) {
+      input.focus(); expect(fireEvent.keyDown(input, { key: ' ', code: 'Space' })).toBe(false);
+      expect(document.activeElement).toBe(host); expect(host.className).toContain('can-pan');
+      fireEvent.keyUp(host, { code: 'Space' }); expect(host.className).not.toContain('can-pan');
+    }
+  }
+  fireEvent.click(screen.getByRole('button', { name: 'Legends (0)' }));
+  const text = screen.getByLabelText('Legend name'); text.focus();
+  expect(fireEvent.keyDown(text, { key: ' ', code: 'Space' })).toBe(true);
+  expect(document.activeElement).toBe(text); expect(host.className).not.toContain('can-pan');
+});
+
+it('handles Space key values when the physical key code is unavailable', () => {
+  render(<PdfNavigationView pages={[page(1)]} />);
+  const host = screen.getByRole('region', { name: 'PDF pages' }), input = screen.getByLabelText('Highlight width'); input.focus();
+  expect(fireEvent.keyDown(input, { key: ' ', code: 'Unidentified' })).toBe(false);
+  expect(document.activeElement).toBe(host); expect(host.className).toContain('can-pan');
+  expect(fireEvent.keyUp(host, { key: ' ', code: 'Unidentified' })).toBe(false); expect(host.className).not.toContain('can-pan');
+});
+
+it('accepts only digits in page entry, restores abandoned edits, and yields focus on Enter or drawing', () => {
+  render(<PdfNavigationView pages={[page(1), page(2), page(3)]} />);
+  const input = screen.getByLabelText('Page number') as HTMLInputElement, host = screen.getByRole('region', { name: 'PDF pages' });
+  input.focus();
+  for (const value of ['letters', '1 2', '1.5', '-2']) { fireEvent.change(input, { target: { value } }); expect(input.value).toBe('1'); }
+  expect(fireEvent.keyDown(input, { key: 'a' })).toBe(false);
+  fireEvent.change(input, { target: { value: '2' } }); fireEvent.keyDown(input, { key: 'Enter' });
+  expect(input.value).toBe('2'); expect(document.activeElement).toBe(host);
+  input.focus(); fireEvent.change(input, { target: { value: '999' } }); fireEvent.keyDown(input, { key: 'Enter' });
+  expect(input.value).toBe('2'); expect(document.activeElement).toBe(host);
+  input.focus(); fireEvent.change(input, { target: { value: '3' } }); fireEvent.keyDown(input, { key: 'Escape' });
+  expect(input.value).toBe('2'); expect(document.activeElement).toBe(host);
+  input.focus(); fireEvent.change(input, { target: { value: '1' } });
+  fireEvent.pointerDown(screen.getByLabelText('PDF page 2'), { button: 0, pointerId: 11 });
+  expect(document.activeElement).toBe(host); expect(input.value).toBe('2');
+  expect(document.querySelector('#pan-hint')).toBeNull();
+});
+
+it('nudges selected highlights instead of scrolling, respects Shift steps and input editing, and records Undo', () => {
+  const stroke = { id: 'nudge', page: 1, type: 'freehand' as const, legendId: null, color: '#facc15', opacity: .4, width: 10, points: [{ x: 20, y: 700 }, { x: 100, y: 700 }] };
+  const history = new SessionHistory({ ...emptySession, annotations: [stroke] });
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Select/Edit' }));
+  fireEvent.change(screen.getByLabelText('Selected stroke'), { target: { value: 'nudge' } });
+  const host = screen.getByRole('region', { name: 'PDF pages' }); host.focus();
+  expect(fireEvent.keyDown(host, { key: 'ArrowRight' })).toBe(false);
+  expect(history.present.annotations[0].points[0]).toEqual({ x: 22, y: 700 });
+  expect(fireEvent.keyDown(host, { key: 'ArrowUp', shiftKey: true })).toBe(false);
+  expect(history.present.annotations[0].points[0]).toEqual({ x: 22, y: 710 }); expect(host.scrollTop).toBe(0);
+  const input = screen.getByLabelText('Selected stroke width'); input.focus();
+  expect(fireEvent.keyDown(input, { key: 'ArrowDown' })).toBe(true);
+  expect(history.present.annotations[0].points[0].y).toBe(710);
+  fireEvent.click(screen.getByRole('button', { name: 'Undo', exact: true }));
+  expect(history.present.annotations[0].points[0]).toEqual({ x: 22, y: 700 });
+});
+
+it('brings an offscreen Undo change into view and marks removed objects on Redo', () => {
+  const stroke = { id: 'offscreen', page: 2, type: 'freehand' as const, legendId: null, color: '#facc15', opacity: .4, width: 10, points: [{ x: 20, y: 600 }, { x: 100, y: 600 }] };
+  const history = new SessionHistory({ ...emptySession, annotations: [stroke] }); history.apply({ type: 'remove-stroke', id: stroke.id });
+  render(<PdfNavigationView pages={[page(1), page(2)]} history={history} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Undo', exact: true }));
+  expect(screen.getByText('Undid Delete stroke · Page 2')).toBeTruthy();
+  expect(screen.getByRole('region', { name: 'PDF pages' }).scrollTop).toBeGreaterThan(0);
+  expect(document.querySelector('[data-page="2"] .history-change-overlay rect')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Redo', exact: true }));
+  expect(screen.getByText('Redid Delete stroke · Page 2')).toBeTruthy();
+  expect(screen.getByLabelText('Highlights for page 2').querySelector('[data-annotation-id]')).toBeNull();
+  expect(document.querySelector('[data-page="2"] .history-change-overlay rect')).toBeTruthy();
 });

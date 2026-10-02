@@ -149,3 +149,32 @@ it('discards straight drafts on cancellation and rejects a straight line ending 
   fireEvent.pointerUp(svg, { pointerId: 4, clientX: 70, clientY: 90, shiftKey: true });
   expect(commit).not.toHaveBeenCalled();
 });
+
+it.each([0, 90, 180, 270])('snaps Ctrl+Shift highlights in displayed coordinates after rotation %i', rotation => {
+  const commit = vi.fn(); const vp = viewport(1, rotation);
+  render(<AnnotationOverlay page={1} viewport={vp} annotations={[]} onCommit={commit} />);
+  const svg = screen.getByLabelText('Highlights for page 1');
+  for (const [dx, dy, expected] of [[60, 8, 0], [8, 60, 90], [50, 40, 45]] as const) {
+    fireEvent.pointerDown(svg, { pointerId: 4, button: 0, clientX: 70, clientY: 90, ctrlKey: true, shiftKey: true });
+    fireEvent.pointerUp(svg, { pointerId: 4, clientX: 70 + dx, clientY: 90 + dy, ctrlKey: true, shiftKey: true });
+    const points = commit.mock.calls.at(-1)![0].points.map((p: { x: number; y: number }) => vp.convertToViewportPoint(p.x, p.y));
+    expect(points).toHaveLength(2);
+    const angle = Math.atan2(points[1][1] - points[0][1], points[1][0] - points[0][0]) * 180 / Math.PI;
+    expect(angle).toBeCloseTo(expected);
+  }
+  expect(commit).toHaveBeenCalledTimes(3);
+});
+
+it('updates snapping immediately as Ctrl is pressed and released, and uses the latest zoom', () => {
+  const commit = vi.fn(); const view = render(<AnnotationOverlay page={1} viewport={viewport()} annotations={[]} onCommit={commit} />);
+  view.rerender(<AnnotationOverlay page={1} viewport={viewport(2)} annotations={[]} onCommit={commit} />);
+  const svg = screen.getByLabelText('Highlights for page 1');
+  fireEvent.pointerDown(svg, { button: 0, pointerId: 4, clientX: 90, clientY: 110 });
+  fireEvent.pointerMove(svg, { buttons: 1, pointerId: 4, clientX: 190, clientY: 130, shiftKey: true });
+  const points = () => svg.querySelector('polyline')!.getAttribute('points'); const free = points();
+  fireEvent.keyDown(window, { key: 'Control', ctrlKey: true, shiftKey: true });
+  expect(points()).not.toBe(free);
+  fireEvent.keyUp(window, { key: 'Control', shiftKey: true }); expect(points()).toBe(free);
+  fireEvent.keyUp(window, { key: 'Shift' }); expect(points()).toBe(free);
+  fireEvent.pointerCancel(svg); expect(commit).not.toHaveBeenCalled();
+});
