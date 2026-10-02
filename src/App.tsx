@@ -1,3 +1,6 @@
+import AppContextMenu, { useAppContextMenu, type MenuItem } from './components/Toolbar/AppContextMenu';
+import FileFeedback, { type FileResult } from './components/Toolbar/FileFeedback';
+import { listen } from '@tauri-apps/api/event';
 import ToolIcon from './components/Toolbar/ToolIcon';
 import './App.css';
 import { readLargerControls, writeLargerControls, readTheme, writeTheme, readSoundsEnabled, writeSoundsEnabled, readSoundVolume, writeSoundVolume, type Theme } from './services/uiPreferences';
@@ -9,7 +12,7 @@ import PdfNavigationView from './components/PdfViewer/PdfNavigationView';
 import { emptySession, type AnnotationSession, type SessionAction } from './services/annotationSession';
 import { sameSource, serializeProject, type SourceIdentity } from './services/projectFormat';
 import { choosePdf, loadSource, readProject, resolveSource, writeProject } from './services/projectService';
-import { exportPdf } from './services/exportService';
+import { exportPdf, printPdf } from './services/exportService';
 import { SessionHistory } from './services/sessionHistory';
 import type { PDFPageProxy } from 'pdfjs-dist';
 import { listRecentFiles, rememberRecentFile, authorizeRecentFile, clearRecentFiles, type RecentFile } from './services/recentFiles';
@@ -29,7 +32,11 @@ function DirtyDialog({ answer }: { answer: (choice: Choice) => void }) {
       <button autoFocus onClick={() => answer('cancel')}>Cancel</button></div>
   </dialog>;
 }
-export default function App() {
+export default function App() { return <AppContextMenu><AppContent /></AppContextMenu>; }
+function AppContent() {
+  const openMenu = useAppContextMenu();
+  const [fileResult,setFileResult] = useState<FileResult|null>(null);
+  const fileResultId = useRef(0);
   const [largerControls, setLargerControls] = useState(readLargerControls);
   const [theme, setTheme] = useState<Theme>(readTheme);
   const [sounds, setSounds] = useState(readSoundsEnabled);
@@ -55,7 +62,7 @@ export default function App() {
   const live = useRef<Work | null>(null), counter = useRef(0), locked = useRef(false), alive = useRef(true);
   const staging = useRef<AbortController | null>(null);
   const replacing = useRef(false);
-  const [operation, setOperation] = useState<'opening' | 'saving' | 'exporting' | 'closing' | null>(null);
+  const [operation, setOperation] = useState<'opening' | 'saving' | 'exporting' | 'printing' | 'closing' | null>(null);
   const [error, setError] = useState<string | null>(null), [notice, setNotice] = useState<string | null>(null);
   const [exportProgress, setExportProgress] = useState('Exporting…');
   const [question, setQuestion] = useState(false);
@@ -89,6 +96,7 @@ export default function App() {
     if (!path || !alive.current || live.current?.id !== snapshot.id) return false;
     publish({ ...live.current, projectPath: path, saved });
     await remember(path);
+    setFileResult({id:++fileResultId.current,kind:'save',path});
     playActionSound('success');
     return !dirty(live.current);
   }
@@ -99,14 +107,14 @@ export default function App() {
     if (choice === 'cancel') return false;
     return choice === 'discard' || await saveCurrent();
   }
-  async function run(kind: 'opening' | 'saving' | 'exporting' | 'closing', task: () => Promise<void>) {
+  async function run(kind: 'opening' | 'saving' | 'exporting' | 'printing' | 'closing', task: () => Promise<void>) {
     if (locked.current) return;
     locked.current = true; replacing.current = kind === 'opening' || kind === 'closing';
     if (replacing.current) live.current?.history.invalidate();
-    setOperation(kind); setError(null); setNotice(null);
+    setOperation(kind); setError(null); setNotice(null); setFileResult(null);
     try { await task(); }
     catch (err) { if (alive.current) { playActionSound('error'); setError(`${err instanceof Error ? err.message : String(err)} Please retry or choose another file.`); } }
-    finally { locked.current = false; replacing.current = false; if (alive.current) { setOperation(null); if (kind !== 'exporting') setNotice(null); } }
+    finally { locked.current = false; replacing.current = false; if (alive.current) { setOperation(null); if (kind !== 'exporting' && kind !== 'printing') setNotice(null); } }
   }
   async function exportCurrent() {
     await run('exporting', async () => {
@@ -117,11 +125,19 @@ export default function App() {
       const path = await exportPdf(snapshot.sourcePath, snapshot.projectPath, snapshot.source,
         snapshot.session, snapshot.controller.signal, setExportProgress);
       if (path && alive.current && live.current?.id === snapshot.id) {
+        setFileResult({id:++fileResultId.current,kind:'export',path});
         setNotice(`Exported ${path.split(/[\\/]/).pop()}. Editable project unchanged.`);
         playActionSound('success');
       }
     });
   }
+  async function printCurrent() {
+    await run('printing',async()=>{const snapshot=live.current;if(!snapshot)return;snapshot.history.cancelSnapshotDrafts();setExportProgress('Preparing print…');await printPdf(snapshot.sourcePath,snapshot.source,snapshot.session,snapshot.controller.signal,setExportProgress);if(alive.current)setNotice('Print preview ready. Click its printer icon; choose “Print using system dialog” if print settings appear.');});
+  }
+  const shortcuts = useRef<(e:KeyboardEvent)=>void>(()=>{});
+  shortcuts.current=e=>{if((e.ctrlKey||e.metaKey)&&['p','s'].includes(e.key.toLowerCase())){e.preventDefault();if(!locked.current&&live.current){if(e.key.toLowerCase()==='p')void printCurrent();else void run('saving',async()=>{await saveCurrent(e.shiftKey);});}}};
+  useEffect(()=>{const key=(e:KeyboardEvent)=>shortcuts.current(e);window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[]);
+  useEffect(()=>{if(!isTauri())return;let disposed=false;let stop:(()=>void)|undefined;void listen<string>('print-error',e=>setError(e.payload)).then(fn=>{if(disposed)fn();else stop=fn;}).catch(err=>console.warn('Print feedback unavailable',err));return()=>{disposed=true;stop?.();};},[]);
   async function openWork(projectMode: boolean, recent?: RecentFile) {
     await run('opening', async () => {
       if (!await guard() || !alive.current) return;
@@ -166,7 +182,8 @@ export default function App() {
     return () => { disposed = true; alive.current = false; unlisten?.(); window.removeEventListener('beforeunload', beforeUnload);
       staging.current?.abort(); live.current?.controller.abort(); pending.current?.('cancel'); pending.current = null; };
   }, []);
-  return <main ref={appRoot} className={`app-shell${largerControls ? ' larger-controls' : ''}`}>
+  const fileActions:MenuItem[]=[{label:'Open PDF',disabled:!!operation,action:()=>void openWork(false)},{label:'Open project',disabled:!!operation,action:()=>void openWork(true)},{label:'Save project · Ctrl+S',disabled:!work||!!operation,action:()=>void run('saving',async()=>{await saveCurrent();})},{label:'Export annotated PDF',disabled:!work||!!operation,action:()=>void exportCurrent()},{label:'Print annotated PDF · Ctrl+P',disabled:!work||!!operation,action:()=>void printCurrent()}];
+  return <main onContextMenu={e=>openMenu(e,fileActions)} ref={appRoot} className={`app-shell${largerControls ? ' larger-controls' : ''}`}>
     <header className="app-header"><h1><span className="app-mark"><ToolIcon name="file" /></span> PDF Markup</h1>
       <div className="project-actions" role="toolbar" aria-label="Project files">
         <button disabled={!!operation} onClick={() => void openWork(false)}>Open PDF</button>
@@ -175,6 +192,7 @@ export default function App() {
         <button className="save-action" title="Save the PDF and editable annotations together in one project" disabled={!work || !!operation} onClick={() => void run('saving', async () => { await saveCurrent(); })}>Save Project</button>
         <button disabled={!work || !!operation} onClick={() => void run('saving', async () => { await saveCurrent(true); })}>Save As</button>
         <button className="primary-action" disabled={!work || !!operation} onClick={() => void exportCurrent()}>Export Annotated PDF</button>
+        <button disabled={!work||!!operation} title="Prepare an annotated print preview, then use its printer icon (Ctrl+P)" onClick={()=>void printCurrent()}>Print</button>
       </div><details ref={preferences} className="ui-preferences"><summary>Preferences</summary><div className="preferences-popover">
         <label><input type="checkbox" checked={theme === 'dark'} onChange={e => { const value = e.target.checked ? 'dark' : 'light'; setTheme(value); writeTheme(value); }} />Dark mode</label>
         <label><input type="checkbox" checked={largerControls} onChange={e => { setLargerControls(e.target.checked); writeLargerControls(e.target.checked); }} />Larger controls</label>
@@ -184,13 +202,14 @@ export default function App() {
           <button disabled={!sounds || volume === 0} data-own-feedback onClick={() => playActionSound('success')}>Test sound</button>
         </div>
       </div></details></header>
-    <p className="document-name" role="status">{work ? `${work.projectPath?.split(/[\\/]/).pop() ?? 'Unsaved project'} · PDF: ${work.source.filename} · ${dirty(work) ? 'Unsaved changes' : work.projectPath ? 'Saved' : 'Ready to save'}` : 'Open a PDF or an editable project.'}{operation && ` · ${operation === 'exporting' ? exportProgress : operation === 'saving' ? 'Saving…' : operation === 'opening' ? 'Opening…' : 'Closing…'}`}{!operation && notice && ` | ${notice}`}</p>
+    <p className="document-name" role="status">{work ? `${work.projectPath?.split(/[\\/]/).pop() ?? 'Unsaved project'} · PDF: ${work.source.filename} · ${dirty(work) ? 'Unsaved changes' : work.projectPath ? 'Saved' : 'Ready to save'}` : 'Open a PDF or an editable project.'}{operation && ` · ${operation === 'exporting' || operation === 'printing' ? exportProgress : operation === 'saving' ? 'Saving…' : operation === 'opening' ? 'Opening…' : 'Closing…'}`}{!operation && notice && ` | ${notice}`}</p>
     {work && <div className="document-location" aria-label="Current file"><strong>{work.projectPath?.split(/[\\/]/).pop() ?? work.source.filename}</strong><span title={work.projectPath ?? work.sourcePath}>{work.projectPath ?? work.sourcePath}</span></div>}
     {error && <p role="alert" className="project-error">{error}</p>}
     {operation && notice && <p role="status" className="document-name">{notice}</p>}
     <div className="project-workspace" inert={operation === 'opening' || operation === 'closing'}>
-      {work ? <PdfNavigationView largerControls={largerControls} key={work.id} pages={work.pages} session={work.session} history={work.history} onHistory={traverse} onAction={(action, generation) => mutate(action, generation, work.id)} disabled={operation === 'opening' || operation === 'closing'} /> : <section className="empty-document"><span className="empty-icon"><ToolIcon name="file" /></span><h2>A clear space for your ideas.</h2><p>Highlight, draw, and add notes to your PDF.<br />Save your PDF and edits together in one project.</p><button className="primary-action" disabled={!!operation} onClick={() => void openWork(false)}>Open a PDF to get started</button><p className="empty-tip">Already started? Use Open Project to pick up where you left off.</p></section>}
+      {work ? <PdfNavigationView fileActions={fileActions} largerControls={largerControls} key={work.id} pages={work.pages} session={work.session} history={work.history} onHistory={traverse} onAction={(action, generation) => mutate(action, generation, work.id)} disabled={operation === 'opening' || operation === 'closing'} /> : <section className="empty-document"><span className="empty-icon"><ToolIcon name="file" /></span><h2>A clear space for your ideas.</h2><p>Highlight, draw, and add notes to your PDF.<br />Save your PDF and edits together in one project.</p><button className="primary-action" disabled={!!operation} onClick={() => void openWork(false)}>Open a PDF to get started</button><p className="empty-tip">Already started? Use Open Project to pick up where you left off.</p></section>}
     </div>
+    {fileResult&&<FileFeedback key={fileResult.id} result={fileResult} dismiss={()=>setFileResult(null)}/>}
     {question && <DirtyDialog answer={answer} />}
   </main>;
 }

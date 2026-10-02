@@ -2,15 +2,25 @@ import { readFile } from "@tauri-apps/plugin-fs";
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
 
 GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url,
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url,
 ).toString();
 
 // Preserve the native picker's path, including spaces and UNC shares.
 // The caller owns this document until it aborts the supplied signal.
-export async function loadDocument(filePath: string, signal: AbortSignal, suppliedBytes?: Uint8Array) {
-  const bytes = suppliedBytes ?? await readFile(filePath);
+export async function loadDocument(
+  filePath: string,
+  signal: AbortSignal,
+  suppliedBytes?: Uint8Array,
+) {
+  const bytes = suppliedBytes ?? (await readFile(filePath));
   signal.throwIfAborted();
-  const assets = new URL(`${import.meta.env.BASE_URL}pdfjs/`, window.location.href);
+
+  const assets = new URL(
+    `${import.meta.env.BASE_URL}pdfjs/`,
+    window.location.href,
+  );
+
   const task = getDocument({
     data: bytes,
     cMapUrl: new URL("cmaps/", assets).href,
@@ -18,10 +28,15 @@ export async function loadDocument(filePath: string, signal: AbortSignal, suppli
     standardFontDataUrl: new URL("standard_fonts/", assets).href,
     wasmUrl: new URL("wasm/", assets).href,
   });
+
   const destroy = () => {
-    void task.destroy().catch((error: unknown) => console.error("PDF cleanup failed", error));
+    void task
+      .destroy()
+      .catch((error: unknown) => console.error("PDF cleanup failed", error));
   };
+
   signal.addEventListener("abort", destroy, { once: true });
+
   try {
     return await task.promise;
   } catch (error) {

@@ -8,7 +8,7 @@ use tauri::Manager;
 use tauri_plugin_fs::FsExt;
 
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
-fn allowed(app: &tauri::AppHandle, path: &Path) -> Result<(), String> {
+pub(crate) fn allowed(app: &tauri::AppHandle, path: &Path) -> Result<(), String> {
     if app.fs_scope().is_allowed(path) {
         Ok(())
     } else {
@@ -224,7 +224,7 @@ fn verified_source(source: &Path, size: u64, sha256: &str) -> Result<Vec<u8>, St
 
 // Recheck the source before an atomic export without allocating another entire
 // PDF. Preserve the same byte count/hash checks used when opening the source.
-fn verify_source_identity(source: &Path, size: u64, sha256: &str) -> Result<(), String> {
+pub(crate) fn verify_source_identity(source: &Path, size: u64, sha256: &str) -> Result<(), String> {
     use sha2::{Digest, Sha256};
     if size == 0 || size > MAX_PDF_BYTES {
         return Err("Export supports source PDFs up to 256 MiB".into());

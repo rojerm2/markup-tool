@@ -1,3 +1,4 @@
+import { showStrokePreview } from '../../services/strokePreview';
 import WidthControl from './WidthControl';
 import type { SessionHistory } from '../../services/sessionHistory';
 
@@ -25,12 +26,12 @@ export default function DrawingControls({ value, history, onChange }: { value: D
     <div className="control-group" role="group" aria-label="Stroke width">
       <WidthControl value={value.width} color={value.color} history={history} onChange={width => onChange({ ...value, width }, false)} />
       {WIDTHS.map(width => <button key={width.value} aria-pressed={value.width === width.value}
-        title={`${width.value} PDF units`} onClick={() => onChange({ ...value, width: width.value }, false)}>{width.name}</button>)}
+        title={`${width.value} PDF units`} onClick={e => { showStrokePreview(e.target,{...value,width:width.value}); onChange({ ...value, width: width.value }, false); }}>{width.name}</button>)}
     </div>
     <div className="control-group" role="group" aria-label="Highlight color">
       <span className="control-label">Color</span>
       {COLORS.map(color => <button key={color.value} className="color-swatch" aria-label={color.name}
-        title={color.name} aria-pressed={value.color === color.value} onClick={() => onChange({ ...value, color: color.value }, true)}>
+        title={color.name} aria-pressed={value.color === color.value} onClick={e => { showStrokePreview(e.target,{...value,color:color.value}); onChange({ ...value, color: color.value }, true); }}>
         <span style={{ background: color.value }}>{value.color === color.value ? '✓' : ''}</span>{color.name}
       </button>)}
     </div>

@@ -1,3 +1,4 @@
+import FontSizeControl from './FontSizeControl';
 import { useEffect, useRef, useState } from 'react';
 import { COLORS } from './DrawingControls';
 import { fitNote, noteTextError, validNote, type NoteObject, type TextNote } from '../../services/notes';
@@ -34,7 +35,7 @@ export default function NoteControls({notes,selected,pointer,onSelect,editing,on
       <button onClick={()=>{setOpen(false);setDraft(null);onClose();}}>Close properties</button>
       {draft?<>
         <label>Note text<textarea aria-label="Note text" autoFocus rows={5} maxLength={4097} value={draft.text} onChange={e=>setDraft({...draft,text:e.target.value.replace(/\r\n?/g,'\n')})}/></label>
-        <label>Text size<select aria-label="Text size" value={draft.fontSize} onChange={e=>setDraft({...draft,fontSize:Number(e.target.value)})}>{[10,12,16,20].map(v=><option key={v} value={v}>{v} PDF units</option>)}</select></label>
+        <FontSizeControl label="Text size" value={draft.fontSize} onChange={fontSize=>setDraft({...draft,fontSize})} />
         <label>Text color<select aria-label="Text color" value={draft.color} onChange={e=>setDraft({...draft,color:e.target.value})}>{!COLORS.some(c=>c.value===draft.color)&&<option value={draft.color}>Saved color</option>}{COLORS.map(c=><option key={c.value} value={c.value}>{c.name}</option>)}</select></label>
         <label>Box width<input aria-label="Note width" type="number" min={40} max={2000} value={draft.width} onChange={e=>setDraft({...draft,width:Number(e.target.value)})}/></label>
         <label>Background<select aria-label="Note background" value={draft.background?'white':'transparent'} onChange={e=>setDraft({...draft,background:e.target.value==='white'})}><option value="white">White</option><option value="transparent">Transparent</option></select></label>

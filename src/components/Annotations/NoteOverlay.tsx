@@ -1,6 +1,8 @@
+import { BOX_HANDLES, boxHandles, resizeBox, type BoxHandle } from '../../services/resizeBox';
+import { layoutNote } from '../../services/notes';
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import { clientToPdf, pdfToClient, pdfToViewport, type Point, type PageViewport } from '../../services/coordinates';
-import { ARROW_DEFAULTS, TEXT_DEFAULTS, fitNote, moveNote, noteLocal, notePoint, validNote, type NoteObject, type TextNote } from '../../services/notes';
+import { ARROW_DEFAULTS, TEXT_DEFAULTS, moveNote, notePoint, validNote, type NoteObject, type TextNote } from '../../services/notes';
 import { constrainedPoint } from '../../services/shapes';
 import { isEditingControl } from '../../services/annotationEditing';
 import { isSpaceKey } from '../../services/canvasFocus';
@@ -32,7 +34,7 @@ export default function NoteOverlay({page,viewport,notes,tool,selected,pointer,p
     if((placing||!g.before)&&n.type==='text')return;
     if(!g.before&&n.type==='arrow')g.value={...n,b:constrainedPoint(g.start,end,'line',shift,rect,viewport)};
     else if(g.handle&&n.type==='arrow')g.value={...n,[g.handle]:constrainedPoint(g.handle==='a'?n.b:n.a,end,'line',shift,rect,viewport)};
-    else if(g.handle==='resize'&&n.type==='text'){const p=noteLocal(n,end);g.value=fitNote({...n,width:Math.max(40,Math.min(2000,p.x)),height:Math.max(30,Math.min(10000,p.y))});}
+    else if(g.handle&&BOX_HANDLES.includes(g.handle as BoxHandle)&&n.type==='text')g.value=resizeBox(n,g.handle as BoxHandle,{x:end.x-g.start.x,y:end.y-g.start.y},40,width=>Math.max(30,layoutNote({...n,width}).height));
     else if(g.handle&&n.type==='text')g.value={...n,pointers:n.pointers.map(p=>p.id===g.handle?{...p,target:end}:p)};
     else g.value=moveNote(n,end.x-g.start.x,end.y-g.start.y);
     g.changed=true;setPreview(g.value);
@@ -44,7 +46,7 @@ export default function NoteOverlay({page,viewport,notes,tool,selected,pointer,p
     if(!before&&tool!=='text'&&tool!=='arrow')return;
     e.preventDefault();e.stopPropagation();
     const handle=target.closest('[data-note-handle]')?.getAttribute('data-note-handle')??target.closest('[data-pointer-id]')?.getAttribute('data-pointer-id')??null;
-    if(before&&!placing)onSelect(before.id,handle&&handle!=='resize'&&handle!=='a'&&handle!=='b'?handle:undefined);
+    if(before&&!placing)onSelect(before.id,handle&&!BOX_HANDLES.includes(handle as BoxHandle)&&handle!=='a'&&handle!=='b'?handle:undefined);
     const value:NoteObject=before??(tool==='text'?{...TEXT_DEFAULTS,id:crypto.randomUUID(),type:'text',page,...start,rotation:((viewport.rotation??0)%360+360)%360 as TextNote['rotation'],text:''}:{...ARROW_DEFAULTS,id:crypto.randomUUID(),type:'arrow',page,a:start,b:start});
     gesture.current={id:e.pointerId,generation:history.generation,before,value,start,client,last:client,handle,changed:false};
     capture.current=e.currentTarget;e.currentTarget.setPointerCapture(e.pointerId);
@@ -55,13 +57,13 @@ export default function NoteOverlay({page,viewport,notes,tool,selected,pointer,p
       const target=clientToPdf(g.last,svg.current!.getBoundingClientRect(),viewport);
       dispatch({type:'put-note',before:g.before,note:{...g.before,pointers:[...g.before.pointers,{...ARROW_DEFAULTS,id:crypto.randomUUID(),target}]}},g.generation);onPlaced();
     }else if(!g.before&&g.value.type==='text')onEdit(g.value);
-    else if(g.changed&&validNote(g.value)){dispatch({type:'put-note',note:g.value,before:g.before},g.generation);onSelect(g.value.id,g.value.type==='text'&&g.handle&&g.handle!=='resize'?g.handle:undefined);}
+    else if(g.changed&&validNote(g.value)){dispatch({type:'put-note',note:g.value,before:g.before},g.generation);onSelect(g.value.id,g.value.type==='text'&&g.handle&&!BOX_HANDLES.includes(g.handle as BoxHandle)?g.handle:undefined);}
   }
   const displayed=notes.map(n=>gesture.current?.before===n&&preview?preview:n);
   if(preview&&!gesture.current?.before)displayed.push(preview);
   const n=tool==='edit'?displayed.find(n=>n.id===selected):undefined;
   const handles:{key:string;p:Point;label:string}[]=n?(n.type==='arrow'?[{key:'a',p:n.a,label:'Arrow start'},{key:'b',p:n.b,label:'Arrow target'}]:[
-    {key:'resize',p:notePoint(n,n.width,n.height),label:'Resize note'},...n.pointers.map((p,i)=>({key:p.id,p:p.target,label:`Pointer target ${i+1}`}))]):[];
+    ...boxHandles(n.width,n.height).map(h=>({key:h.handle,p:notePoint(n,h.x,h.y),label:h.handle==='se'?'Resize note':`Resize note ${h.handle}`})),...n.pointers.map((p,i)=>({key:p.id,p:p.target,label:`Pointer target ${i+1}`}))]):[];
   return <svg ref={svg} className="note-overlay" aria-label={`Notes and arrows for page ${page}`} width={viewport.width} height={viewport.height} style={{pointerEvents:!disabled&&(tool==='text'||tool==='arrow'||placing!==null)?'auto':'none'}}
     onPointerDown={down} onPointerMove={e=>{if(gesture.current?.id===e.pointerId){gesture.current.last={x:e.clientX,y:e.clientY};if(!(e.buttons&1))cancel();else update(gesture.current.last,e.shiftKey);}}}
     onPointerUp={e=>{if(gesture.current?.id===e.pointerId){gesture.current.last={x:e.clientX,y:e.clientY};if(!placing)update(gesture.current.last,e.shiftKey);finish();}}} onPointerCancel={cancel} onLostPointerCapture={cancel}

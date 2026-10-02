@@ -25,6 +25,15 @@ function Harness({history,placing=false}:{history:SessionHistory;placing?:boolea
     <PageLegendOverlay rows={['wall']} page={1} viewport={viewport} session={history.present} history={history} placing={placing} onPlaced={()=>{}} selected={selected} onSelect={select} dispatch={dispatch} editing disabled={false} revision={0}/></>;
 }
 const pointer=(target:Element,kind:'pointerDown'|'pointerMove'|'pointerUp',x:number,y:number)=>fireEvent[kind](target,{pointerId:1,button:0,buttons:kind==='pointerUp'?0:1,clientX:x,clientY:y});
+it('resizes from an edge with one undo step and discards cancelled resizing',()=>{
+  const h=new SessionHistory({...emptySession,legends,pageLegends:[key]});render(<Harness history={h}/>);
+  const svg=screen.getByLabelText('Page legends for page 1'),handle=svg.querySelector('[data-key-handle="e"]')!;
+  pointer(handle,'pointerDown',220,125);pointer(svg,'pointerMove',290,125);
+  expect(h.present.pageLegends![0]).toBe(key);pointer(svg,'pointerUp',290,125);
+  expect(h.present.pageLegends![0].width).toBe(270);act(()=>h.traverse('undo'));expect(h.present.pageLegends![0]).toBe(key);
+  pointer(handle,'pointerDown',220,125);pointer(svg,'pointerMove',280,125);act(()=>h.invalidate());pointer(svg,'pointerUp',280,125);
+  expect(h.present.pageLegends![0]).toBe(key);expect(captured).toBeNull();
+});
 it('keeps placement out of snapshots until release and cancels an incomplete click',()=>{
   const h=new SessionHistory({...emptySession,legends});render(<Harness history={h} placing/>);
   const svg=screen.getByLabelText('Page legends for page 1');pointer(svg,'pointerDown',25,110);

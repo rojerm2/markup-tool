@@ -1,3 +1,5 @@
+import FontSizeControl from './FontSizeControl';
+import { validTextSize } from '../../services/textSize';
 import { useEffect, useState } from 'react';
 import type { PDFPageProxy } from 'pdfjs-dist';
 import type { AnnotationSession, SessionAction } from '../../services/annotationSession';
@@ -20,7 +22,7 @@ export default function PageLegendControls({rows,onRows,session,selected,onSelec
   useEffect(()=>{const cancel=(e:KeyboardEvent)=>{if(e.key==='Escape')reset();};const hidden=()=>{if(document.hidden)reset();};window.addEventListener('keydown',cancel);window.addEventListener('blur',reset);document.addEventListener('visibilitychange',hidden);return()=>{window.removeEventListener('keydown',cancel);window.removeEventListener('blur',reset);document.removeEventListener('visibilitychange',hidden);};},[]);
   function edit(change:Partial<PageLegend>){if(value){if(!draft)setGeneration(history.generation);setDraft({...value,...change});}}
   const initial={title:'LEGEND',categoryIds:rows} as PageLegend;
-  const error=value ? (!Number.isFinite(value.width)||value.width<(value.layout==='columns'?140:100)||value.width>2000 ? `Use a width from ${value.layout==='columns'?140:100} to 2000 PDF units.` : legendTextError(value,session.legends)) : legendTextError(initial,session.legends);
+  const error=value ? (!Number.isFinite(value.width)||value.width<(value.layout==='columns'?140:100)||value.width>2000 ? `Use a width from ${value.layout==='columns'?140:100} to 2000 PDF units.` : !validTextSize(value.fontSize) ? 'Use a text size from 1 to 200 pt.' : legendTextError(value,session.legends)) : legendTextError(initial,session.legends);
   const layout=value?layoutLegend(value,session.legends):null;
   let clipped=false;
   if(value&&layout){const vp=pages[value.page-1].getViewport({scale:1});clipped=[[0,0],[value.width,0],[0,layout.height],[value.width,layout.height]].some(([x,y])=>{const p=pdfToViewport(keyPoint(value,x,y),vp);return p.x<0||p.y<0||p.x>vp.width||p.y>vp.height;});}
@@ -42,7 +44,7 @@ export default function PageLegendControls({rows,onRows,session,selected,onSelec
       <form onSubmit={e=>{e.preventDefault();if(draft&&key&&!error){dispatch({type:'put-key',key:draft,before:key,legends:session.legends},generation);reset();}}}>
         <label>Heading <input aria-label="Legend heading" value={value.title} maxLength={256} onChange={e=>edit({title:e.target.value})}/></label>
         <label>Layout <select aria-label="Legend layout" value={value.layout} onChange={e=>edit({layout:e.target.value as PageLegend['layout']})}><option value="list">List</option><option value="columns">Compact two-column</option></select></label>
-        <label>Text size <select aria-label="Legend text size" value={value.fontSize} onChange={e=>edit({fontSize:Number(e.target.value)})}>{[10,12,16].map(n=><option key={n} value={n}>{n===10?'Small':n===12?'Regular':'Large'}</option>)}</select></label>
+        <FontSizeControl label="Legend text size" value={value.fontSize} onChange={fontSize=>edit({fontSize})} />
         <label>Width <input aria-label="Legend width" type="number" min={100} max={2000} step={20} value={value.width} onChange={e=>edit({width:Number(e.target.value)})}/></label>
           <label>Background<select aria-label="Legend background" value={value.background?'white':'transparent'} onChange={e=>edit({background:e.target.value==='white'})}><option value="white">White</option><option value="transparent">Transparent</option></select></label>
           <label><input type="checkbox" checked={value.border} onChange={e=>edit({border:e.target.checked})}/> Border</label>
@@ -60,7 +62,7 @@ export default function PageLegendControls({rows,onRows,session,selected,onSelec
       <div className="key-preview"><svg aria-label="Legend live preview" viewBox={`0 0 ${value.width} ${layout.height}`} width={Math.min(value.width,300)}><PageLegendGraphic value={value} legends={session.legends}/></svg></div>
       <div className="key-actions"><label>Duplicate to page <select aria-label="Duplicate to page" value={target} onChange={e=>setTarget(e.target.value)}>{pages.map(p=><option key={p.pageNumber}>{p.pageNumber}</option>)}</select></label>
       <button disabled={!!draft||!!error} onClick={()=>{if(!key)return;const p=Number(target),base=newPageLegend(p,pages[p-1].getViewport({scale:1}),key.categoryIds);dispatch({type:'put-key',key:{...key,id:base.id,page:p,x:base.x,y:base.y,rotation:base.rotation},legends:session.legends});}}>Duplicate legend</button>
-      <button onClick={()=>dispatch({type:'remove-key',id:value.id})}>Delete page legend</button><span>Drag to move · Arrow keys nudge · Delete removes this placement only</span></div>
+      <button onClick={()=>dispatch({type:'remove-key',id:value.id})}>Delete page legend</button><span>Drag to move · Drag edge handles to resize · Arrow keys nudge · Delete removes this placement only</span></div>
       {clipped&&<p role="alert">This legend extends beyond the page and will be clipped in export. Reduce its width/text size or move it into the page.</p>}
       </div>
     </details>}

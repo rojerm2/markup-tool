@@ -1,6 +1,7 @@
 mod persistence;
 mod portable;
 mod recent;
+mod printing;
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -17,6 +18,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             greet,
+            printing::print_annotated_pdf,
             recent::list_recent_files,
             recent::remember_recent_file,
             recent::authorize_recent_file,

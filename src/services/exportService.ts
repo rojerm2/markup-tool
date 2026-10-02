@@ -43,3 +43,16 @@ export async function exportPdf(sourcePath: string, projectPath: string | null, 
   signal.throwIfAborted();
   return path;
 }
+
+export async function printPdf(sourcePath: string, source: SourceIdentity, session: AnnotationSession,
+  signal: AbortSignal, onProgress?: (stage: ExportProgress) => void): Promise<void> {
+  serializeProject(source, session);
+  const identity = { sourcePath, size: source.size, sha256: source.sha256 };
+  onProgress?.('Reading PDF…');
+  const bytes = new Uint8Array(await invoke<ArrayBuffer>('read_export_source', identity));
+  signal.throwIfAborted();
+  const output = await generateInWorker(bytes, session, signal, onProgress);
+  signal.throwIfAborted();
+  const metadata = JSON.stringify({ ...identity, filename: source.filename }).replace(/[^\x20-\x7e]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4,'0')}`);
+  await invoke('print_annotated_pdf', output, { headers: { 'x-print-metadata': metadata } });
+}

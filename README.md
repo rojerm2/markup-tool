@@ -47,7 +47,7 @@ To create the Windows installer:
 npm run tauri build -- --bundles nsis
 ```
 
-Copy `src-tauri/target/release/bundle/nsis/pdf-markup-tool_0.2.5_x64-setup.exe` to another 64-bit Windows computer and run it. Launch **pdf-markup-tool** from the Start menu after installation. Node.js and Rust are not needed on that computer. The installer can download Microsoft WebView2 if it is missing.
+Copy `src-tauri/target/release/bundle/nsis/pdf-markup-tool_0.2.6_x64-setup.exe` to another 64-bit Windows computer and run it. Launch **pdf-markup-tool** from the Start menu after installation. Node.js and Rust are not needed on that computer. The installer can download Microsoft WebView2 if it is missing.
 
 ## Validation
 
@@ -81,3 +81,18 @@ One local run measured default parsing/saving at 7.34 seconds and optimized PDF 
 Portable projects contain an 8-byte `PMARKUP` magic/version marker, a little-endian 32-bit metadata length, a little-endian 64-bit PDF length, project JSON, and the original PDF bytes. Metadata remains compatible with the version 2 annotation schema. Legacy JSON project versions 1 and 2 can still be read.
 
 The application limits annotation metadata to 16 MiB and the included PDF to 256 MiB. It checks the included PDF's size and SHA-256 identity before opening it, extracts only to an application-generated temporary file, and saves atomically using a temporary sibling file. Embedded filenames do not authorize access to other local files.
+
+
+## Text boxes, feedback, and printing (0.2.6)
+
+Select a page legend or text note in **Select/Edit**, then drag an edge or corner handle to resize its box. Text reflows when the width changes. The box stays large enough to contain its text; dragging top or left edges holds the opposite edge in place, including on rotated sheets. Resize is one undoable operation. Escape or changing views cancels an unfinished resize.
+
+Legend and note properties offer a **1–200 pt** slider plus direct numeric entry, including fractional sizes. Existing projects keep their original sizes. Saved legends retain their manually expanded box height, and the exported PDF uses the same layout.
+
+Right-click offers application actions: undo/redo, markup tools, selected-object deletion, fitting the view, file operations, and printing. Right-clicking an object selects it. Text fields additionally offer copy, cut, paste, and select-all actions. Keyboard and browser-style menus are replaced inside the editor.
+
+**Print** or **Ctrl+P** prepares a PDF containing every committed annotation and opens its PDF preview. Click the preview’s printer icon. If browser print settings appear, choose **Print using system dialog** to open the Windows print UI. Choose the printer and pages there; cancelling does not alter the project. The print preview keeps a temporary PDF until it closes. Printing does not require exporting or saving a project first. Unsaved text/property drafts must be applied before they can appear in print. **Ctrl+S** saves, and **Ctrl+Shift+S** saves as a new project.
+
+A green check confirms project saves; a blue outgoing arrow confirms exports. Both display the resulting filename, can be dismissed, and respect reduced-motion settings. Highlighter width and color controls show a temporary dot on the visible page at the actual stroke thickness for the current zoom. This preview is not a saved markup and disappears when drawing begins.
+
+The actual user-supplied floor-plan benchmark (96,382,176 bytes, 37 pages) generated an annotated PDF in about **2.45 seconds** on this machine, excluding native transfer and file writing. A desktop export took about **11.7 seconds** from destination confirmation to the final file write while a release build was also running. It preserved all **4,413 original PDF streams** byte-for-byte, page sizes, crop boxes, and rotations. The original file remained unchanged. Run the local benchmark with `PDF_MARKUP_REAL_PDF` set to the PDF path; the private file and generated outputs are excluded from Git.

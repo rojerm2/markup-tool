@@ -1,13 +1,17 @@
+import { useAppContextMenu, type MenuItem } from '../Toolbar/AppContextMenu';
+import StrokeSizePreview from '../Annotations/StrokeSizePreview';
 import ToolIcon from '../Toolbar/ToolIcon';
 import NoteOverlay from '../Annotations/NoteOverlay';
 import NoteControls from '../Annotations/NoteControls';
-import { moveNote, type TextNote } from '../../services/notes';
+import { noteLocal, moveNote, type TextNote } from '../../services/notes';
 import ShapeOverlay from '../Annotations/ShapeOverlay';
 import ShapeControls from '../Annotations/ShapeControls';
-import { SHAPE_DEFAULTS, moveShape, type Shape, type ShapeKind } from '../../services/shapes';
+import { SHAPE_DEFAULTS, pickShape, moveShape, type Shape, type ShapeKind } from '../../services/shapes';
 import RoundingControl from '../Annotations/RoundingControl';
 import PageLegendOverlay from '../Annotations/PageLegendOverlay';
 import PageLegendControls from '../Annotations/PageLegendControls';
+import { keyMatrix, layoutLegend } from '../../services/pageLegend';
+import { pickHighlight } from '../../services/annotationEditing';
 import { viewportToPdf } from '../../services/coordinates';
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PDFPageProxy } from "pdfjs-dist";
@@ -31,7 +35,7 @@ import { isSpaceKey } from '../../services/canvasFocus';
 const GUTTER = 32;
 const LABEL_HEIGHT = 28;
 
-export default function PdfNavigationView({ pages, session: controlled, onAction, history: suppliedHistory, onHistory, disabled = false, largerControls = false }: { pages: PDFPageProxy[]; session?: AnnotationSession; onAction?: (action: SessionAction, generation?: number) => void; history?: SessionHistory; onHistory?: (direction: 'undo' | 'redo') => boolean; disabled?: boolean; largerControls?: boolean }) {
+export default function PdfNavigationView({ pages, session: controlled, onAction, history: suppliedHistory, onHistory, disabled = false, largerControls = false, fileActions = [] }: { fileActions?: MenuItem[]; pages: PDFPageProxy[]; session?: AnnotationSession; onAction?: (action: SessionAction, generation?: number) => void; history?: SessionHistory; onHistory?: (direction: 'undo' | 'redo') => boolean; disabled?: boolean; largerControls?: boolean }) {
   const [local] = useState(() => new SessionHistory(controlled ?? emptySession));
   const [, refresh] = useState(0);
   const history = suppliedHistory ?? local;
@@ -74,6 +78,10 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
   const roundingStroke = tool === 'edit' ? annotations.find(s=>s.id===selectedId) : undefined;
   const [viewRevision, setViewRevision] = useState(0);
   const root = useRef<HTMLDivElement>(null);
+  const openMenu = useAppContextMenu();
+  const [strokePreview,setStrokePreview] = useState<{width:number;color:string}|null>(null);
+  useEffect(() => { let timer:ReturnType<typeof setTimeout>; const show=(event:Event)=>{setStrokePreview((event as CustomEvent).detail);clearTimeout(timer);timer=setTimeout(()=>setStrokePreview(null),3500);};const node=root.current;node?.addEventListener('stroke-preview',show);return()=>{clearTimeout(timer);node?.removeEventListener('stroke-preview',show);};},[]);
+  useEffect(()=>setStrokePreview(null),[tool,disabled]);
   useEffect(() => { if (selectedId && !annotations.some(s => s.id === selectedId)) setSelectedId(null); }, [annotations, selectedId]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -343,7 +351,25 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
   }
 
   function selectNote(id:string,pointer?:string){if(id!==selectedNote||(pointer??null)!==selectedPointer)history.invalidate();const n=session.notes?.find(n=>n.id===id);if(n&&n.page!==current)navigate(n.page);setSelectedNote(id||null);setSelectedPointer(pointer??null);setSelectedShape(null);setSelectedKey(null);setSelectedId(null);setTool('edit');}
-  return <div ref={root} className="pdf-navigation">
+  return <div ref={root} className="pdf-navigation" onContextMenu={e => {
+    let id=selectedNote??selectedKey??selectedShape??selectedId;
+    let removeType:'remove-note'|'remove-key'|'remove-shape'|'remove-stroke'=selectedNote?'remove-note':selectedKey?'remove-key':selectedShape?'remove-shape':'remove-stroke';
+    const node=e.target instanceof Element?e.target.closest<HTMLElement>('[data-page]'):null, canvas=node?.querySelector('canvas');
+    if(canvas){
+      const page=Number(node?.dataset.page), viewport=pages[page-1].getViewport({scale:scales[page-1]}),rect=canvas.getBoundingClientRect(),client={x:e.clientX,y:e.clientY},p=clientToPdf(client,rect,viewport);
+      const key=[...(session.pageLegends??[])].reverse().find(k=>{if(k.page!==page)return false;const [a,b,c,d]=keyMatrix(k),x=a*(p.x-k.x)+b*(p.y-k.y),y=c*(p.x-k.x)+d*(p.y-k.y);return x>=0&&x<=k.width&&y>=0&&y<=layoutLegend(k,session.legends).height;});
+      const note=[...(session.notes??[])].reverse().find(n=>{if(n.page!==page)return false;if(n.type==='text'){const local=noteLocal(n,p);return local.x>=0&&local.x<=n.width&&local.y>=0&&local.y<=n.height;}return !!pickShape([{...n,type:'line',width:Math.max(n.width,n.head),fill:null}],client,rect,viewport);});
+      const shape=pickShape((session.shapes??[]).filter(s=>s.page===page),client,rect,viewport);
+      const stroke=pickHighlight(annotations.filter(s=>s.page===page),client,rect,viewport);
+      id=key?.id??note?.id??shape?.id??stroke?.id??null;removeType=key?'remove-key':note?'remove-note':shape?'remove-shape':'remove-stroke';
+      history.invalidate();setPlacing(false);setSelectedKey(key?.id??null);setSelectedNote(key?null:note?.id??null);setSelectedPointer(null);setSelectedShape(key||note?null:shape?.id??null);setSelectedId(key||note||shape?null:stroke?.id??null);if(id)setTool('edit');
+    }
+    openMenu(e,[{label:'Undo',disabled:disabled||!history.undoLabel,action:()=>traverse('undo')},{label:'Redo',disabled:disabled||!history.redoLabel,action:()=>traverse('redo')},
+      {label:'Highlight',action:()=>{history.invalidate();setPlacing(false);setTool('highlight');}}, {label:'Select / edit markup',action:()=>{history.invalidate();setPlacing(false);setTool('edit');}},
+      ...(id?[{label:'Delete selected markup',disabled,action:()=>dispatch({type:removeType,id})} as MenuItem]:[]),
+      {label:'Properties',action:()=>togglePanel(true)},
+      {label:'Fit to page',action:()=>fit('page')},{label:'Fit to width',action:()=>fit('width')},...fileActions]);
+  }}>
     <div className="primary-tools" role="toolbar" aria-label="Markup tools">
       <div className="tool-modes" role="group" aria-label="History" data-own-feedback>
         <button disabled={disabled || !history.undoLabel} title={`Undo ${history.undoLabel ?? ''} (Ctrl+Z)`} aria-keyshortcuts="Control+z" onClick={() => traverse('undo')}><ToolIcon name="undo" />Undo</button>
@@ -381,6 +407,7 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
     <div ref={host} {...pan} className={`pdf-scroll ${pan.className}`} tabIndex={0}
       role="region" aria-label="PDF pages" onScroll={updateCurrent}
       onPointerDown={event => {
+        setStrokePreview(null);
         if (tool === 'edit' && event.button === 0 && event.target instanceof Element && !event.target.closest('.annotation-overlay')) setSelectedId(null);
       }}>
       <div className="pdf-pages">
@@ -399,6 +426,7 @@ export default function PdfNavigationView({ pages, session: controlled, onAction
               <PageLegendOverlay rows={rows} page={page.pageNumber} viewport={viewport} session={session} history={history} placing={placing}
                 onPlaced={()=>{setPlacing(false);setPanelOpen(true);}} selected={selectedKey} onSelect={id=>{setSelectedNote(null);setSelectedShape(null);setSelectedKey(id);setSelectedId(null);setTool('edit');}}
                 dispatch={dispatch} editing={tool==='edit'&&!pointerPlacement} disabled={disabled||!!editingNote||!!pointerPlacement} revision={viewRevision}/>
+              {strokePreview&&page.pageNumber===current&&<StrokeSizePreview {...strokePreview} viewport={viewport}/>}
               {historyFeedback && <HistoryChangeOverlay key={historyFeedback.id} regions={historyFeedback.regions.filter(r => r.page === page.pageNumber)} viewport={viewport} />}
             </PdfPage>
           </div>;

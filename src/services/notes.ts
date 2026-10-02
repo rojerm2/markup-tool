@@ -1,3 +1,4 @@
+import { validTextSize } from './textSize';
 import metrics from '../assets/legendMetrics.json';
 import { keyMatrix, textWidth } from './pageLegend';
 import type { Point } from './coordinates';
@@ -70,7 +71,7 @@ export function validNote(n: NoteObject, pages=10000): boolean {
   if(n.type==='arrow') return Object.keys(n).every(k=>['id','type','page','a','b','color','width','head'].includes(k))&&point(n.a)&&point(n.b)&&style(n)&&Math.hypot(n.a.x-n.b.x,n.a.y-n.b.y)>=.01&&Math.hypot(n.a.x-n.b.x,n.a.y-n.b.y)<=1e6;
   return n.type==='text'&&Object.keys(n).every(k=>['id','type','page','x','y','rotation','width','height','fontSize','color','background','border','text','pointers'].includes(k))&&point(n)&&[0,90,180,270].includes(n.rotation)&&color(n.color)
     &&Number.isFinite(n.width)&&n.width>=40&&n.width<=2000&&Number.isFinite(n.height)&&n.height>=30&&n.height<=10000
-    &&[10,12,16,20].includes(n.fontSize)&&typeof n.background==='boolean'&&typeof n.border==='boolean'
+    &&validTextSize(n.fontSize)&&typeof n.background==='boolean'&&typeof n.border==='boolean'
     &&typeof n.text==='string'&&!!n.text.trim()&&!noteTextError(n.text)&&layoutNote(n).height<=n.height+1e-7
     &&Array.isArray(n.pointers)&&n.pointers.length<=MAX_POINTERS&&n.pointers.every(p=>!!p&&id(p.id)&&point(p.target)&&style(p)&&Math.hypot(p.target.x-n.x,p.target.y-n.y)<=1e6&&Object.keys(p).every(k=>['id','target','color','width','head'].includes(k)));
 }

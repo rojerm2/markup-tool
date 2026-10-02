@@ -1,3 +1,4 @@
+import { validTextSize } from './textSize';
 import metrics from '../assets/legendMetrics.json';
 import type { Legend } from './annotationSession';
 import type { Point, PageViewport } from './coordinates';
@@ -6,7 +7,7 @@ import { viewportToPdf } from './coordinates';
 export type PageLegend = {
   id: string; page: number; x: number; y: number; rotation: 0 | 90 | 180 | 270;
   categoryIds: string[]; title: string; layout: 'list' | 'columns';
-  width: number; fontSize: number; background: boolean; border: boolean;
+  width: number; height?: number; fontSize: number; background: boolean; border: boolean;
 };
 const widths: Record<string, number> = metrics;
 export function textError(text: string): string | null {
@@ -20,7 +21,7 @@ export function validPageLegend(k: PageLegend, legends: Legend[], pages = 10000)
     && !legends.some(l => l.id === k.id) && Number.isInteger(k.page) && k.page >= 1 && k.page <= pages
     && [k.x,k.y].every(n => Number.isFinite(n) && Math.abs(n) <= 1e9)
     && [0,90,180,270].includes(k.rotation) && ['list','columns'].includes(k.layout)
-    && Number.isFinite(k.width) && k.width >= (k.layout==='columns'?140:100) && k.width <= 2000 && [10,12,16].includes(k.fontSize)
+    && Number.isFinite(k.width) && k.width >= (k.layout==='columns'?140:100) && k.width <= 2000 && validTextSize(k.fontSize) && (k.height === undefined || Number.isFinite(k.height) && k.height >= 1 && k.height <= 10000)
     && typeof k.background === 'boolean' && typeof k.border === 'boolean'
     && typeof k.title === 'string' && k.title.length <= 256 && !/[\u0000-\u001f]/.test(k.title)
     && Array.isArray(k.categoryIds) && k.categoryIds.length > 0 && k.categoryIds.length <= 1000
@@ -57,7 +58,7 @@ export function layoutLegend(k: PageLegend, legends: Legend[]) {
     }
     y+=height+6;
   }
-  return {texts,chips,chip,height:y-6+pad};
+  return {texts,chips,chip,height:Math.max(y-6+pad,k.height??0)};
 }
 // Local key coordinates run right/down; this matrix maps them to raw PDF space.
 export function keyMatrix(k: Pick<PageLegend, 'x'|'y'|'rotation'>): [number,number,number,number,number,number] {

@@ -28,7 +28,7 @@ it('migrates v1 without changing legacy values and validates v2 ordered referenc
   const legacy={...base,legends:[...legends,{id:'legacy',name:'原本',color:'#123456'}]};
   expect(parseProject(JSON.stringify({format:'pdf-markup-project',version:1,source,session:legacy})).session).toEqual(legacy);
   const session={...base,pageLegends:[key]};expect(parseProject(serializeProject(source,session)).session).toEqual(session);
-  for(const change of [{categoryIds:['wall','wall']},{categoryIds:['missing']},{categoryIds:[]},{x:Infinity},{width:0},{fontSize:9},{rotation:45},{layout:'other'},{page:3},{id:'wall'},{id:'bad\n'},{title:'bad\n'}]) {
+  for(const change of [{categoryIds:['wall','wall']},{categoryIds:['missing']},{categoryIds:[]},{x:Infinity},{width:0},{fontSize:0},{rotation:45},{layout:'other'},{page:3},{id:'wall'},{id:'bad\n'},{title:'bad\n'}]) {
     expect(()=>serializeProject(source,{...base,pageLegends:[{...key,...change} as PageLegend]})).toThrow();
   }
   expect(()=>parseProject(JSON.stringify({format:'pdf-markup-project',version:3,source,session}))).toThrow(/version/);

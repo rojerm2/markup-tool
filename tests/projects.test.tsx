@@ -4,7 +4,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import type { PDFPageProxy } from 'pdfjs-dist';
 import App from '../src/App';
 import * as exports from '../src/services/exportService';
-vi.mock('../src/services/exportService', () => ({ exportPdf: vi.fn() }));
+vi.mock('../src/services/exportService', () => ({ exportPdf: vi.fn(), printPdf: vi.fn() }));
+vi.mock('@tauri-apps/api/event',()=>({listen:vi.fn(async()=>()=>{})}));
 import * as files from '../src/services/projectService';
 import * as recents from '../src/services/recentFiles';
 vi.mock('../src/services/recentFiles', () => ({ listRecentFiles: vi.fn(), rememberRecentFile: vi.fn(), authorizeRecentFile: vi.fn(), clearRecentFiles: vi.fn() }));
