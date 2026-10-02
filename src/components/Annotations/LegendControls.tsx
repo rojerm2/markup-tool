@@ -45,11 +45,10 @@ export default function LegendControls({ session, dispatch }: { session: Annotat
             <span className="legend-dot" style={{ background: legend.color }} /><span>{legend.name}</span>
           </button>
           <button aria-label={`Rename legend ${legend.name}`} onClick={() => { setEditing(legend.id); setName(legend.name); setError(null); }}>Rename</button>
-          <button aria-label={`Delete legend ${legend.name}`} aria-describedby={`${formId}-delete`}
+          <button aria-label={`Delete legend ${legend.name}`}
             onClick={() => { dispatch({ type: 'delete', id: legend.id }); if (editing === legend.id) reset(); }}>Delete</button>
         </div>)}
       </div>
-      <p id={`${formId}-delete`} className="legend-note">Deleting a category keeps its strokes and colors and makes them unassigned. Its rows are removed from every page legend; empty page legends are removed. Undo restores everything.</p>
       <form onSubmit={submit} className="legend-form">
         <label>{editing ? 'Rename legend' : 'New legend'}<input aria-label="Legend name" maxLength={256} value={name}
           aria-invalid={!!error} aria-describedby={error ? errorId : undefined}

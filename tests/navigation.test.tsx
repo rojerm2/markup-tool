@@ -109,7 +109,7 @@ it("anchors zoom to the viewed PDF point, cancels old rasters and bounds zoom/al
   expect(host.scrollTop).toBeCloseTo(314);
   expect(vi.mocked(first.render).mock.results[0].value.cancel).toHaveBeenCalledOnce();
   for (let i = 0; i < 20; i++) fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
-  expect(screen.getByLabelText("Zoom level").textContent).toBe("800%");
+  expect(screen.getByLabelText("Zoom level").textContent).toBe("3200%");
   expect(screen.getByRole("button", { name: "Zoom in" }).hasAttribute("disabled")).toBe(true);
   const canvas = screen.getByLabelText("PDF page 1") as HTMLCanvasElement;
   expect(canvas.width * canvas.height).toBeLessThanOrEqual(16_000_000);
@@ -245,7 +245,7 @@ it("cancels only Ctrl-wheel, anchors to the pointer and respects wheel zoom limi
   const after = screen.getByLabelText('PDF page 1').getBoundingClientRect();
   expect(after.top + relativeY * Math.exp(.2)).toBeCloseTo(300);
   for (let i = 0; i < 10; i++) fireEvent.wheel(host, { ctrlKey: true, deltaY: -500 });
-  expect(screen.getByLabelText('Zoom level').textContent).toBe('800%');
+  expect(screen.getByLabelText('Zoom level').textContent).toBe('3200%');
   for (let i = 0; i < 10; i++) fireEvent.wheel(host, { ctrlKey: true, deltaY: 500 });
   expect(screen.getByLabelText('Zoom level').textContent).toBe('10%');
 });

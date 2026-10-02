@@ -58,7 +58,7 @@ export default function ShapeOverlay({page,viewport,shapes,tool,style,selected,o
     onPointerCancel={cancel} onLostPointerCapture={cancel}>
     {displayed.map(s=><g key={s.id} data-shape-id={s.id} data-shape-kind={s.type} data-draft={s===preview?'true':undefined}>
       <path d={svgPath(shapePath(s),p=>pdfToViewport(p,viewport))} fill={s.fill??'none'} fillOpacity={.2} stroke={s.color} strokeOpacity={1} strokeWidth={pdfWidthToViewport(s.width,viewport)} strokeLinejoin="miter" strokeMiterlimit={2} strokeLinecap="round" pointerEvents="none" />
-      {tool==='edit'&&!disabled&&<path d={svgPath(shapePath(s),p=>pdfToViewport(p,viewport))} fill={s.fill?'transparent':'none'} stroke="transparent" strokeWidth={pdfWidthToViewport(s.width,viewport)+10} style={{pointerEvents:s.fill?'all':'stroke'}} />}
+      {tool==='edit'&&!disabled&&<path d={svgPath(shapePath(s),p=>pdfToViewport(p,viewport))} fill={s.fill?'transparent':'none'} stroke="transparent" strokeWidth={pdfWidthToViewport(s.width,viewport)+10} style={{pointerEvents:s.fill?'all':'stroke',cursor:'pointer'}} />}
     </g>)}
     {selectedShape&&<g data-shape-selection="true"><path d={svgPath(shapePath(selectedShape),p=>pdfToViewport(p,viewport))} fill="none" stroke="#172554" strokeWidth={1.5} strokeDasharray="4 4" pointerEvents="none" />
       {shapeHandles(selectedShape).map((p,i)=>{const v=pdfToViewport(p,viewport);return <rect key={i} data-shape-handle={i} role="button" tabIndex={disabled?-1:0} aria-label={`Resize ${selectedShape.type} ${selectedShape.type==='line'?'endpoint':'corner'} ${i+1}`} onBlur={()=>{if(gesture.current?.pointer===-1)cancel();}}

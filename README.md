@@ -12,7 +12,13 @@ Space returns numeric fields and sliders to the canvas for panning. Enter finish
 
 **Shift + drag** draws a straight highlight at any angle; **Ctrl + Shift + drag** snaps it to the nearest horizontal, vertical, or 45-degree direction. In Select/Edit, arrow keys move a selected highlight by 2 view units at 100% zoom; hold Shift for 10. These movements are undoable.
 
-**Preferences** contains Dark mode, Larger controls, and Action sounds. These preferences persist locally and do not affect project contents or PDF colors. Dark mode initially follows the system appearance. Sounds are quiet and off by default.
+**Preferences** contains Dark mode, Larger controls, and Action sounds. These preferences persist locally and do not affect project contents or PDF colors. Dark mode initially follows the system appearance. Sounds are off by default; enable them and adjust the **Volume** slider from 0 to 100%. Use **Test sound** to hear the current level. The default enabled volume is louder than in 0.2.4.
+
+Zoom extends from **10% to 3200%**, using the buttons or Ctrl + wheel. For large sheets and high zoom, a sharp tile follows the visible area while a bounded overview preserves the rest of the page. This avoids allocating a canvas for the entire sheet at full resolution. Drawing and exported annotations remain vectors.
+
+The current filename and full path appear above the workspace. For a saved or opened project, this shows the `.pmarkup` location instead of the temporary copy of its included PDF. **Recent files** lists the last 12 PDFs and projects, with full paths and last-opened date/time. Click a file to reopen it directly, including after restarting the app. **Clear list** removes only the recent history. Moved or missing files show an error and leave the current work open. Recent files are stored locally in the app's configuration directory; only previously authorized file paths can be reopened.
+
+In **Select/Edit**, a hand pointer marks clickable highlights, shapes, notes, arrows, and page legends. Resize handles retain their editing cursor, and panning shows grab/grabbing cursors.
 
 Undo/redo briefly outlines affected areas and shows the action/page in a status message. Offscreen changes are brought into view; deleted objects are outlined where they used to be. Reduced-motion settings use a static outline instead of pulsing.
 
@@ -41,7 +47,7 @@ To create the Windows installer:
 npm run tauri build -- --bundles nsis
 ```
 
-Copy `src-tauri/target/release/bundle/nsis/pdf-markup-tool_0.2.4_x64-setup.exe` to another 64-bit Windows computer and run it. Launch **pdf-markup-tool** from the Start menu after installation. Node.js and Rust are not needed on that computer. The installer can download Microsoft WebView2 if it is missing.
+Copy `src-tauri/target/release/bundle/nsis/pdf-markup-tool_0.2.5_x64-setup.exe` to another 64-bit Windows computer and run it. Launch **pdf-markup-tool** from the Start menu after installation. Node.js and Rust are not needed on that computer. The installer can download Microsoft WebView2 if it is missing.
 
 ## Validation
 

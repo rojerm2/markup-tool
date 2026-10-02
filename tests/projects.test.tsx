@@ -6,6 +6,8 @@ import App from '../src/App';
 import * as exports from '../src/services/exportService';
 vi.mock('../src/services/exportService', () => ({ exportPdf: vi.fn() }));
 import * as files from '../src/services/projectService';
+import * as recents from '../src/services/recentFiles';
+vi.mock('../src/services/recentFiles', () => ({ listRecentFiles: vi.fn(), rememberRecentFile: vi.fn(), authorizeRecentFile: vi.fn(), clearRecentFiles: vi.fn() }));
 import { emptySession } from '../src/services/annotationSession';
 import { parseProject } from '../src/services/projectFormat';
 vi.mock('../src/services/projectService', () => ({ choosePdf: vi.fn(), loadSource: vi.fn(), readProject: vi.fn(), resolveSource: vi.fn(), writeProject: vi.fn() }));
@@ -28,6 +30,10 @@ function create(name = 'Walls') {
 function deferred<T>() { let resolve!: (value: T) => void, reject!: (error: Error) => void; const promise = new Promise<T>((yes,no) => { resolve=yes; reject=no; }); return {promise,resolve,reject}; }
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(recents.listRecentFiles).mockResolvedValue([]);
+  vi.mocked(recents.rememberRecentFile).mockResolvedValue([]);
+  vi.mocked(recents.authorizeRecentFile).mockResolvedValue();
+  vi.mocked(recents.clearRecentFiles).mockResolvedValue();
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({} as CanvasRenderingContext2D);
@@ -47,6 +53,8 @@ it('opens a bundled project without a PDF picker, preserves its filename and exp
   expect(files.choosePdf).not.toHaveBeenCalled();
   expect(status()).toContain(source.filename);
   expect(status()).not.toContain('pdf-markup-included.pdf');
+  expect(screen.getByLabelText('Current file').textContent).toContain('D:\\moved.pmarkup');
+  expect(screen.getByLabelText('Current file').textContent).not.toContain(cached);
   click('Save Project'); await idle();
   const saved = vi.mocked(files.writeProject).mock.calls[0];
   expect(saved[1]).toBe(cached);
@@ -54,6 +62,40 @@ it('opens a bundled project without a PDF picker, preserves its filename and exp
   click('Export Annotated PDF'); await idle();
   expect(exports.exportPdf).toHaveBeenCalledWith(cached, 'C:\\plans\\one.pmarkup',
     expect.objectContaining({filename:source.filename}), expect.anything(), expect.any(AbortSignal), expect.any(Function));
+});
+
+it('lists paths and dates, directly reopens recent PDFs, and retains work when a recent file is missing', async () => {
+  const entry: recents.RecentFile = {path:'D:\\Other\\floor.pdf',filename:'floor.pdf',kind:'pdf',lastOpened:Date.UTC(2026,9,2,9)};
+  vi.mocked(recents.listRecentFiles).mockResolvedValue([entry]);
+  vi.mocked(recents.rememberRecentFile).mockResolvedValue([entry]);
+  render(<App />); await screen.findByText('floor.pdf');
+  fireEvent.click(screen.getByText('Recent files', {selector:'summary'}));
+  const recent = screen.getByRole('button', {name:/floor.pdf.*Last opened/});
+  expect(recent.textContent).toContain(entry.path); expect(recent.querySelector('time')?.dateTime).toBe('2026-10-02T09:00:00.000Z');
+  fireEvent.click(recent); await screen.findByLabelText('PDF page 2'); await idle();
+  expect(files.choosePdf).not.toHaveBeenCalled(); expect(recents.authorizeRecentFile).toHaveBeenCalledWith(entry.path);
+  expect(files.loadSource).toHaveBeenCalledWith(entry.path,expect.any(AbortSignal));
+  expect(screen.getByLabelText('Current file').textContent).toContain(entry.path);
+  vi.mocked(recents.authorizeRecentFile).mockRejectedValueOnce(new Error('Recent file was moved or removed'));
+  fireEvent.click(recent); await idle(); expect(screen.getByRole('alert').textContent).toContain('moved or removed');
+  expect(screen.getByLabelText('PDF page 2')).toBeTruthy(); expect(files.loadSource).toHaveBeenCalledTimes(1);
+  click('Clear list'); await idle(); expect(recents.clearRecentFiles).toHaveBeenCalledOnce(); expect(screen.getByText('No recent files yet.')).toBeTruthy();
+});
+
+it('guards unsaved changes when opening a recent project and remembers successful Save As destinations', async () => {
+  const entry: recents.RecentFile = {path:'D:\\Saved\\one.pmarkup',filename:'one.pmarkup',kind:'project',lastOpened:Date.now()};
+  vi.mocked(recents.listRecentFiles).mockResolvedValue([entry]); vi.mocked(recents.rememberRecentFile).mockResolvedValue([entry]);
+  vi.mocked(files.readProject).mockResolvedValue({path:entry.path,project:parseProject(JSON.stringify({format:'pdf-markup-project',version:2,source,session:emptySession}))});
+  vi.mocked(files.resolveSource).mockResolvedValue('D:\\Cache\\included.pdf');
+  render(<App />); await openPdf(); create();
+  const recent=screen.getByRole('button',{name:/one.pmarkup.*Last opened/});
+  fireEvent.click(recent); click('Cancel'); await idle(); expect(recents.authorizeRecentFile).not.toHaveBeenCalled();
+  fireEvent.click(recent); click('Discard changes'); await idle();
+  expect(files.readProject).toHaveBeenCalledWith(entry.path); expect(files.choosePdf).toHaveBeenCalledTimes(1);
+  expect(recents.rememberRecentFile).toHaveBeenLastCalledWith(entry.path);
+  vi.mocked(files.writeProject).mockResolvedValueOnce('D:\\Saved\\backup.pmarkup'); click('Save As'); await idle();
+  expect(recents.rememberRecentFile).toHaveBeenLastCalledWith('D:\\Saved\\backup.pmarkup');
+  expect(screen.getByLabelText('Current file').textContent).toContain('D:\\Saved\\backup.pmarkup');
 });
 it('first Save, subsequent Save, Save As, reopen and continued legend edits preserve stable state', async () => {
   render(<App />); await openPdf(); create(); click('Thick');

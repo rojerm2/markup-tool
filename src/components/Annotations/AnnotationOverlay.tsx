@@ -60,7 +60,7 @@ export default function AnnotationOverlay({ page, viewport, annotations, onCommi
   }, []);
   // A view change abandons an unfinished gesture, never connecting two views.
   useEffect(() => { cancel(); }, [viewport.width, viewport.height, ...(viewport.transform ?? [])]);
-  useEffect(() => { cancel(); }, [tool, disabled, viewRevision]);
+  useEffect(() => { cancel(); if (svg.current) svg.current.style.cursor = ''; }, [tool, disabled, viewRevision]);
   useEffect(() => {
     const active = move.current;
     if (active && (!annotations.includes(active.before) || legends !== active.legends || selectedId !== active.before.id)) cancel();
@@ -117,7 +117,11 @@ export default function AnnotationOverlay({ page, viewport, annotations, onCommi
       const stroke: Highlight = { id: crypto.randomUUID(), legendId, page, type: 'freehand', points: [point(event)], ...style };
       draft.current = { pointer: event.pointerId, generation: history?.generation, stroke, samples: [...stroke.points] }; setPreview(stroke);
     }}
-    onPointerMove={event => { if ((draft.current?.pointer === event.pointerId || move.current?.pointer === event.pointerId) && event.buttons === 0) cancel(); else { append(event); appendMove(event); } }}
+    onPointerMove={event => {
+      event.currentTarget.style.cursor = tool === 'edit' && !disabled && pickHighlight(annotations, { x: event.clientX, y: event.clientY }, event.currentTarget.getBoundingClientRect(), viewport) ? 'pointer' : '';
+      if ((draft.current?.pointer === event.pointerId || move.current?.pointer === event.pointerId) && event.buttons === 0) cancel(); else { append(event); appendMove(event); }
+    }}
+    onPointerLeave={event => { event.currentTarget.style.cursor = ''; }}
     onPointerUp={event => {
       if (move.current?.pointer === event.pointerId) {
         appendMove(event);

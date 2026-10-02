@@ -1,10 +1,13 @@
 type Sound = 'control' | 'markup' | 'undo' | 'redo' | 'success' | 'error';
-let enabled = false, context: AudioContext | undefined, lastPlayed = -Infinity;
-export function configureActionSounds(value: boolean): void { enabled = value; }
+let enabled = false, volume = 60, context: AudioContext | undefined, lastPlayed = -Infinity;
+export function configureActionSounds(value: boolean, level = 60): void {
+  enabled = value;
+  volume = Number.isFinite(level) ? Math.min(100, Math.max(0, level)) : 60;
+}
 
 // Quiet synthesized cues require no assets, network, or microphone access.
 export function playActionSound(kind: Sound = 'control'): void {
-  if (!enabled || typeof window.AudioContext !== 'function') return;
+  if (!enabled || volume === 0 || typeof window.AudioContext !== 'function') return;
   const now = performance.now();
   if (now - lastPlayed < 65) return;
   lastPlayed = now;
@@ -14,7 +17,7 @@ export function playActionSound(kind: Sound = 'control'): void {
     const frequencies = { control: 520, markup: 660, undo: 330, redo: 440, success: 780, error: 220 };
     const oscillator = context.createOscillator(), gain = context.createGain(), time = context.currentTime;
     oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(frequencies[kind], time);
-    gain.gain.setValueAtTime(0, time); gain.gain.linearRampToValueAtTime(0.035, time + 0.008);
+    gain.gain.setValueAtTime(0, time); gain.gain.linearRampToValueAtTime(0.18 * (volume / 100) ** 2, time + 0.008);
     gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.075);
     oscillator.connect(gain); gain.connect(context.destination);
     oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };

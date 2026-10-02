@@ -7,8 +7,8 @@ export const projectFilters = [{ name: 'Editable markup project (*.pmarkup)', ex
 export async function choosePdf(title = 'Open PDF') {
   return open({ title, multiple: false, filters: [{ name: 'Source PDF', extensions: ['pdf'] }] });
 }
-export async function readProject() {
-  const path = await open({ title: 'Open editable project', multiple: false, filters: projectFilters });
+export async function readProject(recentPath?: string) {
+  const path = recentPath ?? await open({ title: 'Open editable project', multiple: false, filters: projectFilters });
   if (!path) return null;
   const text = await invoke<string>('read_project', { path });
   if (text.length > MAX_PROJECT_BYTES) throw new Error('Project exceeds 16 MiB.');

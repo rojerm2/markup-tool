@@ -35,7 +35,7 @@ export function pdfToClient(point: Point, rect: PageRect, viewport: PageViewport
 
 export type ZoomMode = "manual" | "page" | "width";
 export const MIN_ZOOM = 0.1;
-export const MAX_ZOOM = 8;
+export const MAX_ZOOM = 32;
 export const clampZoom = (scale: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale));
 
 // Fit modes deliberately allow scales below the manual minimum for huge sheets.

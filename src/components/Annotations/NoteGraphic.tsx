@@ -8,8 +8,8 @@ export function ArrowGraphic({a,b,style,viewport,hit=false}:{a:Point;b:Point;sty
   return <g>
     <path d={path(g.shaft)} fill="none" stroke={style.color} strokeWidth={pdfWidthToViewport(style.width,viewport)} strokeLinecap="butt" pointerEvents="none"/>
     <path d={path(g.head)} fill={style.color} pointerEvents="none"/>
-    {hit&&<><path d={path(g.shaft)} fill="none" stroke="transparent" strokeWidth={pdfWidthToViewport(style.width,viewport)+12} pointerEvents="stroke"/>
-      <path d={path(g.head)} fill="transparent" stroke="transparent" strokeWidth={10} pointerEvents="all"/></>}
+    {hit&&<><path d={path(g.shaft)} fill="none" stroke="transparent" strokeWidth={pdfWidthToViewport(style.width,viewport)+12} pointerEvents="stroke" style={{cursor:'pointer'}}/>
+      <path d={path(g.head)} fill="transparent" stroke="transparent" strokeWidth={10} pointerEvents="all" style={{cursor:'pointer'}}/></>}
   </g>;
 }
 export default function NoteGraphic({note,viewport,editing=false}:{note:NoteObject;viewport:PageViewport;editing?:boolean}) {
@@ -18,7 +18,7 @@ export default function NoteGraphic({note,viewport,editing=false}:{note:NoteObje
   return <g data-note-id={note.id}>
     {note.pointers.map(pointer=>{const a=pointerOrigin(note,pointer.target);return a&&<g key={pointer.id} data-pointer-id={pointer.id}><ArrowGraphic a={a} b={pointer.target} style={pointer} viewport={viewport} hit={editing}/></g>;})}
     <g transform={`matrix(${x.x-p.x} ${x.y-p.y} ${y.x-p.x} ${y.y-p.y} ${p.x} ${p.y})`}>
-      <rect width={note.width} height={note.height} fill={note.background?'white':'transparent'} stroke={note.border?note.color:'none'} strokeWidth={.5} pointerEvents={editing?'all':'none'}/>
+      <rect width={note.width} height={note.height} fill={note.background?'white':'transparent'} stroke={note.border?note.color:'none'} strokeWidth={.5} pointerEvents={editing?'all':'none'} style={{cursor:editing?'pointer':undefined}}/>
       {layoutNote(note).lines.map((line,i)=>{let x=8;return <text key={i} y={8+note.fontSize+i*note.fontSize*1.4} fontFamily="LegendSans" fontSize={note.fontSize} fill={note.color} xmlSpace="preserve" pointerEvents="none" style={{fontKerning:'none'}}>
         {[...line].map((c,j)=>{const at=x;x+=textWidth(c,note.fontSize);return <tspan key={j} x={at}>{c}</tspan>;})}
       </text>;})}

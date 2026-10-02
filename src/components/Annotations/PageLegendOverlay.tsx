@@ -48,7 +48,7 @@ export default function PageLegendOverlay({rows,page,viewport,session,history,pl
     }}
     onPointerUp={()=>{const m=move.current,k=previewRef.current,p=placement.current;cancel();if(p){dispatch({type:'put-key',key:p.key,legends:p.legends},p.generation);onPlaced();onSelect(p.key.id);}else if(m&&k)dispatch({type:'put-key',key:k,before:m.before,legends:m.legends},m.generation);}}
     onPointerCancel={cancel} onLostPointerCapture={cancel} onPointerLeave={()=>{if(!move.current&&!placement.current)show(null);}}>
-    {(session.pageLegends??[]).filter(k=>k.page===page).map(k=><g key={k.id} style={{pointerEvents:editing&&!disabled?'all':'none'}}>
+    {(session.pageLegends??[]).filter(k=>k.page===page).map(k=><g key={k.id} style={{pointerEvents:editing&&!disabled?'all':'none',cursor:editing&&!disabled?'pointer':undefined}}>
       <PageLegendGraphic value={move.current?.before===k&&preview?preview:k} legends={session.legends} viewport={viewport} selected={selected===k.id}/>
     </g>)}
     {placing&&preview&&<g opacity={.8} pointerEvents="none"><PageLegendGraphic value={preview} legends={session.legends} viewport={viewport}/></g>}

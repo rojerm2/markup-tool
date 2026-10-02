@@ -1,6 +1,6 @@
 import ToolIcon from './components/Toolbar/ToolIcon';
 import './App.css';
-import { readLargerControls, writeLargerControls, readTheme, writeTheme, readSoundsEnabled, writeSoundsEnabled, type Theme } from './services/uiPreferences';
+import { readLargerControls, writeLargerControls, readTheme, writeTheme, readSoundsEnabled, writeSoundsEnabled, readSoundVolume, writeSoundVolume, type Theme } from './services/uiPreferences';
 import { configureActionSounds, listenForControlSounds, playActionSound } from './services/actionSounds';
 import { useEffect, useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
@@ -12,6 +12,8 @@ import { choosePdf, loadSource, readProject, resolveSource, writeProject } from 
 import { exportPdf } from './services/exportService';
 import { SessionHistory } from './services/sessionHistory';
 import type { PDFPageProxy } from 'pdfjs-dist';
+import { listRecentFiles, rememberRecentFile, authorizeRecentFile, clearRecentFiles, type RecentFile } from './services/recentFiles';
+import RecentFilesMenu from './components/Toolbar/RecentFilesMenu';
 
 type Work = { id: number; sourcePath: string; projectPath: string | null; source: SourceIdentity;
   pages: PDFPageProxy[]; history: SessionHistory; session: AnnotationSession; saved: string; controller: AbortController };
@@ -31,10 +33,17 @@ export default function App() {
   const [largerControls, setLargerControls] = useState(readLargerControls);
   const [theme, setTheme] = useState<Theme>(readTheme);
   const [sounds, setSounds] = useState(readSoundsEnabled);
+  const [volume, setVolume] = useState(readSoundVolume);
+  const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
   const appRoot = useRef<HTMLElement>(null);
   const preferences = useRef<HTMLDetailsElement>(null);
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
-  useEffect(() => { configureActionSounds(sounds); }, [sounds]);
+  useEffect(() => { configureActionSounds(sounds, volume); }, [sounds, volume]);
+  useEffect(() => {
+    let current = true;
+    void listRecentFiles().then(files => { if (current) setRecentFiles(files); }).catch(err => console.warn('Recent files unavailable', err));
+    return () => { current = false; };
+  }, []);
   useEffect(() => { if (appRoot.current) return listenForControlSounds(appRoot.current); }, []);
   useEffect(() => {
     const outside = (event: PointerEvent) => { if (event.target instanceof Node && !preferences.current?.contains(event.target) && preferences.current) preferences.current.open = false; };
@@ -53,6 +62,10 @@ export default function App() {
   const pending = useRef<((choice: Choice) => void) | null>(null);
   const dirty = (value: Work | null) => !!value && JSON.stringify(value.session) !== value.saved;
   function publish(value: Work) { live.current = value; setWork(value); }
+  async function remember(path: string) {
+    try { const files = await rememberRecentFile(path); if (alive.current) setRecentFiles(files); }
+    catch (err) { if (alive.current) setError(`File opened or saved, but the recent files list could not be updated: ${String(err)}`); }
+  }
   function mutate(action: SessionAction, generation: number | undefined, workId: number) {
     const current = live.current;
     if (!current || current.id !== workId || replacing.current) return;
@@ -75,6 +88,7 @@ export default function App() {
     const path = await writeProject(as ? null : snapshot.projectPath, snapshot.sourcePath, serialized);
     if (!path || !alive.current || live.current?.id !== snapshot.id) return false;
     publish({ ...live.current, projectPath: path, saved });
+    await remember(path);
     playActionSound('success');
     return !dirty(live.current);
   }
@@ -108,12 +122,13 @@ export default function App() {
       }
     });
   }
-  async function openWork(projectMode: boolean) {
+  async function openWork(projectMode: boolean, recent?: RecentFile) {
     await run('opening', async () => {
       if (!await guard() || !alive.current) return;
-      const selected = projectMode ? await readProject() : null;
+      if (recent) await authorizeRecentFile(recent.path);
+      const selected = projectMode ? await readProject(recent?.path) : null;
       if (projectMode && !selected) return;
-      let path = selected ? await resolveSource(selected.path, selected.project.source.reference) : await choosePdf();
+      let path = selected ? await resolveSource(selected.path, selected.project.source.reference) : recent?.path ?? await choosePdf();
       if (selected && !path) {
         setNotice(`Locate PDF: ${selected.project.source.filename}. The selected file must match the saved SHA-256 identity.`);
         path = await choosePdf(`Locate PDF — ${selected.project.source.filename}`);
@@ -132,6 +147,7 @@ export default function App() {
         staging.current = null;
         playActionSound('success');
         previous?.controller.abort();
+        await remember(selected?.path ?? path);
       } finally { if (staging.current === controller) { controller.abort(); staging.current = null; } }
     });
   }
@@ -155,16 +171,21 @@ export default function App() {
       <div className="project-actions" role="toolbar" aria-label="Project files">
         <button disabled={!!operation} onClick={() => void openWork(false)}>Open PDF</button>
         <button disabled={!!operation} onClick={() => void openWork(true)}>Open Project</button>
+        <RecentFilesMenu files={recentFiles} disabled={!!operation} onOpen={file => void openWork(file.kind === 'project', file)} onClear={() => void run('saving', async () => { await clearRecentFiles(); if (alive.current) setRecentFiles([]); })} />
         <button className="save-action" title="Save the PDF and editable annotations together in one project" disabled={!work || !!operation} onClick={() => void run('saving', async () => { await saveCurrent(); })}>Save Project</button>
         <button disabled={!work || !!operation} onClick={() => void run('saving', async () => { await saveCurrent(true); })}>Save As</button>
         <button className="primary-action" disabled={!work || !!operation} onClick={() => void exportCurrent()}>Export Annotated PDF</button>
       </div><details ref={preferences} className="ui-preferences"><summary>Preferences</summary><div className="preferences-popover">
         <label><input type="checkbox" checked={theme === 'dark'} onChange={e => { const value = e.target.checked ? 'dark' : 'light'; setTheme(value); writeTheme(value); }} />Dark mode</label>
         <label><input type="checkbox" checked={largerControls} onChange={e => { setLargerControls(e.target.checked); writeLargerControls(e.target.checked); }} />Larger controls</label>
-        <label><input type="checkbox" checked={sounds} onChange={e => { setSounds(e.target.checked); writeSoundsEnabled(e.target.checked); configureActionSounds(e.target.checked); }} />Action sounds</label>
-        <small>Quiet cues for controls, markup, undo/redo, and file actions.</small>
+        <label><input type="checkbox" checked={sounds} onChange={e => { setSounds(e.target.checked); writeSoundsEnabled(e.target.checked); configureActionSounds(e.target.checked, volume); }} />Action sounds</label>
+        <div className="sound-volume"><label htmlFor="sound-volume">Volume <output>{volume}%</output></label>
+          <input id="sound-volume" type="range" min="0" max="100" step="1" value={volume} disabled={!sounds} onChange={e => { const value = Number(e.target.value); setVolume(value); writeSoundVolume(value); configureActionSounds(sounds, value); }} />
+          <button disabled={!sounds || volume === 0} data-own-feedback onClick={() => playActionSound('success')}>Test sound</button>
+        </div>
       </div></details></header>
     <p className="document-name" role="status">{work ? `${work.projectPath?.split(/[\\/]/).pop() ?? 'Unsaved project'} · PDF: ${work.source.filename} · ${dirty(work) ? 'Unsaved changes' : work.projectPath ? 'Saved' : 'Ready to save'}` : 'Open a PDF or an editable project.'}{operation && ` · ${operation === 'exporting' ? exportProgress : operation === 'saving' ? 'Saving…' : operation === 'opening' ? 'Opening…' : 'Closing…'}`}{!operation && notice && ` | ${notice}`}</p>
+    {work && <div className="document-location" aria-label="Current file"><strong>{work.projectPath?.split(/[\\/]/).pop() ?? work.source.filename}</strong><span title={work.projectPath ?? work.sourcePath}>{work.projectPath ?? work.sourcePath}</span></div>}
     {error && <p role="alert" className="project-error">{error}</p>}
     {operation && notice && <p role="status" className="document-name">{notice}</p>}
     <div className="project-workspace" inert={operation === 'opening' || operation === 'closing'}>

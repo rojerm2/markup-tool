@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { PDFPageProxy } from "pdfjs-dist";
 
 import type { ReactNode } from "react";
+import DetailTile from './DetailTile';
 
 type Props = { page: PDFPageProxy; scale?: number; children?: ReactNode; active?: boolean; pixelBudget?: number };
 
@@ -58,7 +59,7 @@ export default function PdfPage({ page, scale = 1.25, children, active = true, p
     <section aria-label={`Page ${page.pageNumber}`}>
       <p className="page-label">Page {page.pageNumber}</p>
       {error && <p role="alert">Could not render page {page.pageNumber}: {error}</p>}
-      <div className="page-surface" style={{ width: viewport.width, height: viewport.height, background: "white" }}><div ref={hostRef} />{children}</div>
+      <div className="page-surface" style={{ width: viewport.width, height: viewport.height, background: "white" }}><div ref={hostRef} /><DetailTile page={page} scale={scale} active={active} pixelBudget={pixelBudget} />{children}</div>
     </section>
   );
 }
