@@ -36,6 +36,7 @@ type Props = {
   disabled?: boolean;
   viewRevision?: number;
   history?: SessionHistory;
+  locked?: (id: string) => boolean;
 };
 const NO_LEGENDS: Legend[] = [];
 
@@ -54,6 +55,7 @@ export default function AnnotationOverlay({
   disabled = false,
   viewRevision = 0,
   history,
+  locked = () => false,
 }: Props) {
   const svg = useRef<SVGSVGElement>(null);
   const currentViewport = useRef(viewport);
@@ -240,6 +242,7 @@ export default function AnnotationOverlay({
             event.currentTarget.getBoundingClientRect(),
             viewport,
           );
+          if (hit && locked(hit.id)) return;
           onSelect?.(hit?.id ?? null);
           event.currentTarget
             .closest<HTMLElement>(".pdf-scroll")

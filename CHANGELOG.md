@@ -15,6 +15,10 @@ Versioned changes follow [Semantic Versioning](https://semver.org/).
   thumbnail previews and direct selection of off-page annotations.
 - Project bookmarks and restored page, zoom and PDF-space view position without
   adding navigation steps to annotation undo history.
+- Undoable category visibility and locking, enforced by the annotation state
+  layer and preserved in version 3 projects.
+- Atomic mixed-markup transactions and bounded copy/paste geometry handling
+  for bulk editing.
 
 ## [0.3.0] - 2026-10-04
 

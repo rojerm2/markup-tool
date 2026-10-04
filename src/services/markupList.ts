@@ -2,6 +2,7 @@ import type { AnnotationSession } from "./annotationSession";
 import { keyPoint, layoutLegend } from "./pageLegend";
 import { notePoint } from "./notes";
 import type { Point } from "./coordinates";
+import { objectCategory } from "./categoryPolicy";
 
 export type MarkupType = "highlight" | "shape" | "text" | "arrow" | "legend";
 export type MarkupRow = {
@@ -79,6 +80,11 @@ export function markupRows(session: AnnotationSession): MarkupRow[] {
         layoutLegend(k, session.legends).height / 2,
       ),
     });
+  for (const row of rows) {
+    const id = objectCategory(session, row.id);
+    row.categoryId = id;
+    row.category = categories.get(id ?? "") ?? "Unassigned";
+  }
   return rows.sort((a, b) => a.page - b.page);
 }
 

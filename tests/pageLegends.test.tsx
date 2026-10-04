@@ -108,7 +108,7 @@ it("migrates v1 without changing legacy values and validates v2 ordered referenc
     parseProject(
       JSON.stringify({
         format: "pdf-markup-project",
-        version: 3,
+        version: 99,
         source,
         session,
       }),

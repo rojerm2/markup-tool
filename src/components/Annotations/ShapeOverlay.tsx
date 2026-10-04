@@ -36,6 +36,7 @@ export default function ShapeOverlay({
   history,
   disabled,
   revision,
+  locked = () => false,
 }: {
   page: number;
   viewport: PageViewport;
@@ -48,6 +49,7 @@ export default function ShapeOverlay({
   history: SessionHistory;
   disabled: boolean;
   revision: number;
+  locked?: (id: string) => boolean;
 }) {
   const svg = useRef<SVGSVGElement>(null);
   const capturedElement = useRef<SVGSVGElement | null>(null);
@@ -169,6 +171,7 @@ export default function ShapeOverlay({
         ? shapes.find((s) => s.id === selected)
         : (pickShape(shapes, client, rect, viewport) ?? undefined);
     if (!creating && !before) return;
+    if (before && locked(before.id)) return;
     e.preventDefault();
     e.stopPropagation();
     const shape: Shape = before ?? {

@@ -8,13 +8,21 @@ import {
   type PageLegend,
 } from "./pageLegend";
 import type { Highlight } from "../types/annotation";
+import { objectExists, objectLocked } from "./categoryPolicy";
 import {
   DEFAULT_DRAWING,
   type DrawingStyle,
 } from "../components/Annotations/DrawingControls";
 
-export type Legend = { id: string; name: string; color: string };
+export type Legend = {
+  id: string;
+  name: string;
+  color: string;
+  hidden?: boolean;
+  locked?: boolean;
+};
 export type AnnotationSession = {
+  objectCategories?: Record<string, string>;
   notes?: NoteObject[];
   shapes?: Shape[];
   pageLegends?: PageLegend[];
@@ -50,7 +58,9 @@ export function legendNameError(
     return "A legend with this name already exists.";
   return null;
 }
-export type SessionAction =
+export type SingleSessionAction =
+  | { type: "category-settings"; id: string; hidden: boolean; locked: boolean }
+  | { type: "assign-category"; ids: string[]; categoryId: string | null }
   | { type: "put-note"; note: NoteObject; before?: NoteObject }
   | { type: "remove-note"; id: string }
   | { type: "put-shape"; shape: Shape; before?: Shape }
@@ -81,6 +91,21 @@ export type SessionAction =
     }
   | { type: "commit"; stroke: Highlight };
 
+export type BulkLabel =
+  | "Move selection"
+  | "Delete selection"
+  | "Duplicate markups"
+  | "Paste markups"
+  | "Assign category";
+export type SessionAction =
+  | SingleSessionAction
+  | {
+      type: "bulk";
+      before: AnnotationSession;
+      actions: SingleSessionAction[];
+      label: BulkLabel;
+    };
+
 const validColor = (color: string) => /^#[0-9a-f]{6}$/.test(color);
 const validStyle = (style: DrawingStyle) =>
   validRounding(style.rounding) &&
@@ -106,11 +131,179 @@ export function sessionReducer(
   state: AnnotationSession,
   action: SessionAction,
 ): AnnotationSession {
+  if (action.type === "bulk") {
+    if (
+      action.before !== state ||
+      !Array.isArray(action.actions) ||
+      !action.actions.length ||
+      action.actions.length > 1000 ||
+      ![
+        "Move selection",
+        "Delete selection",
+        "Duplicate markups",
+        "Paste markups",
+        "Assign category",
+      ].includes(action.label)
+    )
+      return state;
+    let next = state;
+    for (const item of action.actions) {
+      if (
+        !item ||
+        ![
+          "put-note",
+          "remove-note",
+          "put-shape",
+          "remove-shape",
+          "put-key",
+          "remove-key",
+          "remove-stroke",
+          "edit-stroke",
+          "move-stroke",
+          "commit",
+          "assign-category",
+        ].includes(item.type)
+      )
+        return state;
+      const changed = sessionReducer(next, item);
+      // A rejected/stale child must not leave earlier changes applied.
+      if (changed === next) return state;
+      next = changed;
+    }
+    return next;
+  }
+  const editedId =
+    action.type === "put-note"
+      ? action.note.id
+      : action.type === "put-shape"
+        ? action.shape.id
+        : action.type === "put-key"
+          ? action.key.id
+          : action.type === "move-stroke"
+            ? action.before.id
+            : [
+                  "remove-note",
+                  "remove-shape",
+                  "remove-key",
+                  "remove-stroke",
+                  "edit-stroke",
+                ].includes(action.type) && "id" in action
+              ? action.id
+              : null;
+  if (editedId && objectLocked(state, editedId)) return state;
+  if (
+    action.type === "commit" &&
+    state.legends.some(
+      (l) => l.id === action.stroke.legendId && (l.locked || l.hidden),
+    )
+  )
+    return state;
+  if (
+    action.type === "delete" &&
+    state.legends.find((l) => l.id === action.id)?.locked
+  )
+    return state;
+  if (
+    action.type.startsWith("remove-") &&
+    "id" in action &&
+    typeof action.id === "string" &&
+    state.objectCategories &&
+    Object.prototype.hasOwnProperty.call(state.objectCategories, action.id)
+  ) {
+    const next = sessionReducer(
+      { ...state, objectCategories: undefined },
+      action,
+    );
+    if (
+      next.annotations === state.annotations &&
+      next.shapes === state.shapes &&
+      next.notes === state.notes &&
+      next.pageLegends === state.pageLegends
+    )
+      return state;
+    const categories = Object.fromEntries(
+      Object.entries(state.objectCategories).filter(([id]) => id !== action.id),
+    );
+    if (Object.keys(categories).length)
+      return { ...next, objectCategories: categories };
+    delete next.objectCategories;
+    return next;
+  }
   const noteIds = (state.notes ?? []).flatMap((n) => [
     n.id,
     ...(n.type === "text" ? n.pointers.map((p) => p.id) : []),
   ]);
   switch (action.type) {
+    case "category-settings": {
+      if (
+        typeof action.hidden !== "boolean" ||
+        typeof action.locked !== "boolean" ||
+        !state.legends.some((l) => l.id === action.id)
+      )
+        return state;
+      if (
+        state.legends.some(
+          (l) =>
+            l.id === action.id &&
+            !!l.hidden === action.hidden &&
+            !!l.locked === action.locked,
+        )
+      )
+        return state;
+      return {
+        ...state,
+        legends: state.legends.map((l) =>
+          l.id === action.id
+            ? { ...l, hidden: action.hidden, locked: action.locked }
+            : l,
+        ),
+        activeLegendId:
+          (action.hidden || action.locked) && state.activeLegendId === action.id
+            ? null
+            : state.activeLegendId,
+      };
+    }
+    case "assign-category": {
+      if (
+        !Array.isArray(action.ids) ||
+        !action.ids.length ||
+        action.ids.length > 1000 ||
+        new Set(action.ids).size !== action.ids.length ||
+        action.ids.some(
+          (id) => !objectExists(state, id) || objectLocked(state, id),
+        ) ||
+        (action.categoryId !== null &&
+          !state.legends.some((l) => l.id === action.categoryId))
+      )
+        return state;
+      const selected = new Set(action.ids),
+        categories = { ...state.objectCategories };
+      for (const id of action.ids) {
+        if (state.annotations.some((s) => s.id === id)) continue;
+        if (action.categoryId === null) delete categories[id];
+        else
+          Object.defineProperty(categories, id, {
+            value: action.categoryId,
+            writable: true,
+            enumerable: true,
+            configurable: true,
+          });
+      }
+      const color = state.legends.find(
+        (l) => l.id === action.categoryId,
+      )?.color;
+      const next = {
+        ...state,
+        annotations: state.annotations.map((s) =>
+          selected.has(s.id)
+            ? { ...s, legendId: action.categoryId, color: color ?? s.color }
+            : s,
+        ),
+      };
+      if (Object.keys(categories).length) next.objectCategories = categories;
+      else delete next.objectCategories;
+      return next;
+    }
     case "put-note": {
       const notes = state.notes ?? [],
         n = action.note;
@@ -332,6 +525,21 @@ export function sessionReducer(
             .filter((k) => k.categoryIds.length),
         ),
         legends: state.legends.filter((item) => item.id !== action.id),
+        ...(state.objectCategories
+          ? {
+              objectCategories: Object.fromEntries(
+                Object.entries(state.objectCategories).filter(
+                  ([id, category]) =>
+                    category !== action.id &&
+                    !state.pageLegends?.some(
+                      (k) =>
+                        k.id === id &&
+                        k.categoryIds.every((c) => c === action.id),
+                    ),
+                ),
+              ),
+            }
+          : {}),
         activeLegendId:
           state.activeLegendId === action.id ? null : state.activeLegendId,
         annotations: state.annotations.map((stroke) =>
@@ -343,7 +551,9 @@ export function sessionReducer(
     case "select": {
       if (
         action.id !== null &&
-        !state.legends.some((item) => item.id === action.id)
+        !state.legends.some(
+          (item) => item.id === action.id && !item.hidden && !item.locked,
+        )
       )
         return state;
       const legend = state.legends.find((item) => item.id === action.id);

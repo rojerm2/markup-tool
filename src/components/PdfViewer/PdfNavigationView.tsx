@@ -61,6 +61,7 @@ import {
   type DocumentNavigation,
 } from "../../services/documentNavigation";
 import type { MarkupRow } from "../../services/markupList";
+import { objectLocked, objectVisible } from "../../services/categoryPolicy";
 
 const GUTTER = 32;
 const LABEL_HEIGHT = 28;
@@ -102,6 +103,12 @@ export default function PdfNavigationView({
   const [, refresh] = useState(0);
   const history = suppliedHistory ?? local;
   const session = controlled ?? history.present;
+  const visible = (id: string) => objectVisible(session, id);
+  const lockedObject = (id: string) => objectLocked(session, id);
+  const workspaceSession = {
+    ...session,
+    pageLegends: session.pageLegends?.filter((k) => visible(k.id)),
+  };
   const [historyFeedback, setHistoryFeedback] = useState<{
     id: number;
     message: string;
@@ -171,6 +178,22 @@ export default function PdfNavigationView({
     useState<Pick<Shape, "color" | "width" | "fill">>(SHAPE_DEFAULTS);
   const currentShape = session.shapes?.find((s) => s.id === selectedShape);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  useEffect(() => {
+    if (
+      [selectedId, selectedShape, selectedNote, selectedKey].some(
+        (id) => id && (!visible(id) || lockedObject(id)),
+      )
+    ) {
+      history.invalidate();
+      setSelectedId(null);
+      setSelectedShape(null);
+      setSelectedNote(null);
+      setSelectedPointer(null);
+      setSelectedKey(null);
+      setEditingNote(null);
+      setPointerPlacement(null);
+    }
+  }, [session.legends, session.objectCategories]);
   const [roundingPreview, setRoundingPreview] = useState<number | null>(null);
   const roundingStroke =
     tool === "edit" ? annotations.find((s) => s.id === selectedId) : undefined;
@@ -769,6 +792,16 @@ export default function PdfNavigationView({
     history.invalidate();
     navigate(row.page);
     centerAt(row.page, row.center);
+    if (!visible(row.id) || lockedObject(row.id)) {
+      setSelectedId(null);
+      setSelectedShape(null);
+      setSelectedNote(null);
+      setSelectedKey(null);
+      setTool("pan");
+      queueNavigation(row.page);
+      host.current?.focus({ preventScroll: true });
+      return;
+    }
     setPlacing(false);
     setPointerPlacement(null);
     setSelectedPointer(null);
@@ -928,6 +961,7 @@ export default function PdfNavigationView({
   }, [session.shapes, selectedShape]);
 
   function selectShape(id: string | null) {
+    if (id && (!visible(id) || lockedObject(id))) return;
     setSelectedNote(null);
     history.invalidate();
     const s = session.shapes?.find((s) => s.id === id);
@@ -941,6 +975,7 @@ export default function PdfNavigationView({
   }
 
   function selectStroke(id: string | null) {
+    if (id && (!visible(id) || lockedObject(id))) return;
     setSelectedNote(null);
     const stroke = annotations.find((s) => s.id === id);
     if (stroke && stroke.page !== current) navigate(stroke.page);
@@ -950,6 +985,7 @@ export default function PdfNavigationView({
   }
 
   function selectNote(id: string, pointer?: string) {
+    if (id && (!visible(id) || lockedObject(id))) return;
     if (id !== selectedNote || (pointer ?? null) !== selectedPointer)
       history.invalidate();
     const n = session.notes?.find((n) => n.id === id);
@@ -988,7 +1024,8 @@ export default function PdfNavigationView({
             client = { x: e.clientX, y: e.clientY },
             p = clientToPdf(client, rect, viewport);
           const key = [...(session.pageLegends ?? [])].reverse().find((k) => {
-            if (k.page !== page) return false;
+            if (k.page !== page || !visible(k.id) || lockedObject(k.id))
+              return false;
             const [a, b, c, d] = keyMatrix(k),
               x = a * (p.x - k.x) + b * (p.y - k.y),
               y = c * (p.x - k.x) + d * (p.y - k.y);
@@ -1000,7 +1037,8 @@ export default function PdfNavigationView({
             );
           });
           const note = [...(session.notes ?? [])].reverse().find((n) => {
-            if (n.page !== page) return false;
+            if (n.page !== page || !visible(n.id) || lockedObject(n.id))
+              return false;
             if (n.type === "text") {
               const local = noteLocal(n, p);
               return (
@@ -1025,13 +1063,17 @@ export default function PdfNavigationView({
             );
           });
           const shape = pickShape(
-            (session.shapes ?? []).filter((s) => s.page === page),
+            (session.shapes ?? []).filter(
+              (s) => s.page === page && visible(s.id) && !lockedObject(s.id),
+            ),
             client,
             rect,
             viewport,
           );
           const stroke = pickHighlight(
-            annotations.filter((s) => s.page === page),
+            annotations.filter(
+              (s) => s.page === page && visible(s.id) && !lockedObject(s.id),
+            ),
             client,
             rect,
             viewport,
@@ -1484,6 +1526,7 @@ export default function PdfNavigationView({
                     )}
                   >
                     <AnnotationOverlay
+                      locked={lockedObject}
                       page={page.pageNumber}
                       viewport={viewport}
                       style={drawing}
@@ -1508,7 +1551,11 @@ export default function PdfNavigationView({
                       }
                       viewRevision={viewRevision}
                       annotations={annotations
-                        .filter((stroke) => stroke.page === page.pageNumber)
+                        .filter(
+                          (stroke) =>
+                            stroke.page === page.pageNumber &&
+                            visible(stroke.id),
+                        )
                         .map((s) =>
                           s === roundingStroke && roundingPreview !== null
                             ? { ...s, rounding: roundingPreview }
@@ -1519,10 +1566,11 @@ export default function PdfNavigationView({
                       }
                     />
                     <ShapeOverlay
+                      locked={lockedObject}
                       page={page.pageNumber}
                       viewport={viewport}
                       shapes={(session.shapes ?? []).filter(
-                        (s) => s.page === page.pageNumber,
+                        (s) => s.page === page.pageNumber && visible(s.id),
                       )}
                       tool={
                         tool === "text" || tool === "arrow" || tool === "pan"
@@ -1551,10 +1599,11 @@ export default function PdfNavigationView({
                       revision={viewRevision}
                     />
                     <NoteOverlay
+                      locked={lockedObject}
                       page={page.pageNumber}
                       viewport={viewport}
                       notes={(session.notes ?? []).filter(
-                        (n) => n.page === page.pageNumber,
+                        (n) => n.page === page.pageNumber && visible(n.id),
                       )}
                       tool={tool === "pan" ? "highlight" : tool}
                       selected={selectedNote}
@@ -1572,10 +1621,11 @@ export default function PdfNavigationView({
                       revision={viewRevision}
                     />
                     <PageLegendOverlay
+                      locked={lockedObject}
                       rows={rows}
                       page={page.pageNumber}
                       viewport={viewport}
-                      session={session}
+                      session={workspaceSession}
                       history={history}
                       placing={placing}
                       onPlaced={() => {

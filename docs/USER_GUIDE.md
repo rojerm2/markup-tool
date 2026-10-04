@@ -47,6 +47,13 @@ or annotation data.
 
 ## Existing projects
 
+In **Legends**, **Hide/Show** controls workspace visibility; exported PDFs still
+include hidden categories. **Lock/Unlock** protects assigned markups from moves,
+deletion and style changes. Locked categories cannot be deleted or selected for
+new highlighting until explicitly unlocked. These settings are undoable and
+saved in the project. Projects with category protection use schema version 3;
+older releases reject them instead of silently dropping the protection.
+
 Older projects stored a reference to the original PDF. Open one and locate that PDF if prompted, then save it to upgrade it. New portable projects require this version of the app; older app versions cannot open them. Project files now include the PDF's contents, so they are larger than the old annotation-only files.
 
 ## Run and build

@@ -11,6 +11,73 @@ import PdfNavigationView from "../src/components/PdfViewer/PdfNavigationView";
 import { SessionHistory } from "../src/services/sessionHistory";
 import { emptySession } from "../src/services/annotationSession";
 
+it("hides categories only in the workspace and prevents locked canvas edits until explicitly unlocked", () => {
+  const stroke = {
+    id: "protected",
+    type: "freehand" as const,
+    page: 1,
+    legendId: "wall",
+    color: "#facc15",
+    opacity: 0.4,
+    width: 10,
+    points: [
+      { x: 100, y: 200 },
+      { x: 200, y: 200 },
+    ],
+  };
+  const history = new SessionHistory({
+    ...emptySession,
+    legends: [{ id: "wall", name: "Walls", color: "#facc15" }],
+    annotations: [stroke],
+  });
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  fireEvent.click(screen.getByRole("button", { name: "Legends (1)" }));
+  const overlay = screen.getByLabelText("Highlights for page 1");
+  expect(
+    overlay.querySelector('[data-annotation-id="protected"]'),
+  ).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Hide category Walls" }));
+  expect(overlay.querySelector('[data-annotation-id="protected"]')).toBeNull();
+  expect(history.present.annotations[0]).toBe(stroke);
+  fireEvent.click(screen.getByRole("button", { name: "Show category Walls" }));
+  expect(
+    overlay.querySelector('[data-annotation-id="protected"]'),
+  ).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Lock category Walls" }));
+  expect(
+    screen
+      .getByRole("button", { name: "Delete legend Walls" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Select/Edit" }));
+  fireEvent.pointerDown(overlay, {
+    pointerId: 8,
+    button: 0,
+    clientX: 299,
+    clientY: 550,
+  });
+  fireEvent.pointerMove(overlay, {
+    pointerId: 8,
+    buttons: 1,
+    clientX: 349,
+    clientY: 550,
+  });
+  fireEvent.pointerUp(overlay, { pointerId: 8 });
+  expect(history.present.annotations[0]).toBe(stroke);
+  const lockedSession = history.present;
+  history.apply({ type: "remove-stroke", id: "protected" });
+  expect(history.present).toBe(lockedSession);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Unlock category Walls" }),
+  );
+  expect(
+    screen
+      .getByRole("button", { name: "Delete legend Walls" })
+      .hasAttribute("disabled"),
+  ).toBe(false);
+  expect(history.apply({ type: "remove-stroke", id: "protected" })).toBe(true);
+});
+
 it("restores page/zoom/center and flushes the latest view before a save snapshot", () => {
   const history = new SessionHistory(emptySession),
     onNavigation = vi.fn();

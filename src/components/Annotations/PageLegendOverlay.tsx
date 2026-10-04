@@ -38,6 +38,7 @@ export default function PageLegendOverlay({
   editing,
   disabled,
   revision,
+  locked = () => false,
 }: {
   rows: string[];
   page: number;
@@ -52,6 +53,7 @@ export default function PageLegendOverlay({
   editing: boolean;
   disabled: boolean;
   revision: number;
+  locked?: (id: string) => boolean;
 }) {
   const svg = useRef<SVGSVGElement>(null);
   const placement = useRef<{
@@ -201,6 +203,7 @@ export default function PageLegendOverlay({
           ?.getAttribute("data-key-id");
         const before = session.pageLegends?.find((k) => k.id === id);
         if (!before) return;
+        if (locked(before.id)) return;
         e.preventDefault();
         onSelect(before.id);
         e.currentTarget

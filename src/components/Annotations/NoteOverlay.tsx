@@ -44,6 +44,7 @@ export default function NoteOverlay({
   history,
   disabled,
   revision,
+  locked = () => false,
 }: {
   page: number;
   viewport: PageViewport;
@@ -59,6 +60,7 @@ export default function NoteOverlay({
   history: SessionHistory;
   disabled: boolean;
   revision: number;
+  locked?: (id: string) => boolean;
 }) {
   const svg = useRef<SVGSVGElement>(null),
     capture = useRef<SVGSVGElement | null>(null);
@@ -197,6 +199,7 @@ export default function NoteOverlay({
           )
         : undefined;
     if (!before && tool !== "text" && tool !== "arrow") return;
+    if (before && locked(before.id)) return;
     e.preventDefault();
     e.stopPropagation();
     const handle =
@@ -357,7 +360,12 @@ export default function NoteOverlay({
               .closest("[data-note-id]")
               ?.getAttribute("data-note-id"),
         );
-        if (!disabled && tool === "edit" && found?.type === "text")
+        if (
+          !disabled &&
+          tool === "edit" &&
+          found?.type === "text" &&
+          !locked(found.id)
+        )
           onEdit(found);
       }}
     >

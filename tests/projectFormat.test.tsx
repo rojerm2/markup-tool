@@ -83,7 +83,7 @@ describe("runtime validation", () => {
     [
       "version",
       (v) => {
-        v.version = 3 as 1;
+        v.version = 99 as 1;
       },
     ],
     [

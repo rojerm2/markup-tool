@@ -20,7 +20,7 @@ export type SourceIdentity = {
 };
 export type Project = {
   format: "pdf-markup-project";
-  version: 2;
+  version: 2 | 3;
   source: SourceIdentity;
   session: AnnotationSession;
   navigation?: DocumentNavigation;
@@ -108,7 +108,7 @@ export function parseProject(text: string): Project {
   }
   const root = object(raw, "root");
   if (root.format !== "pdf-markup-project") return fail("format");
-  if (root.version !== 1 && root.version !== 2)
+  if (root.version !== 1 && root.version !== 2 && root.version !== 3)
     return fail("unsupported version");
   const source = object(root.source, "source");
   const sha256 = string(source.sha256, "source hash", 64);
@@ -137,7 +137,27 @@ export function parseProject(text: string): Project {
       return fail("duplicate ID or invalid/duplicate legend name");
     ids.add(id);
     names.add(name.toLowerCase());
-    return { id, name, color: color(legend.color) };
+    if (
+      (legend.hidden !== undefined && typeof legend.hidden !== "boolean") ||
+      (legend.locked !== undefined && typeof legend.locked !== "boolean")
+    )
+      return fail("category visibility/locking");
+    if (
+      root.version !== 3 &&
+      (legend.hidden !== undefined || legend.locked !== undefined)
+    )
+      return fail("category settings require project version 3");
+    return {
+      id,
+      name,
+      color: color(legend.color),
+      ...(legend.hidden !== undefined
+        ? { hidden: legend.hidden as boolean }
+        : {}),
+      ...(legend.locked !== undefined
+        ? { locked: legend.locked as boolean }
+        : {}),
+    };
   });
   const relationship = (id: unknown): string | null =>
     id === null
@@ -249,21 +269,44 @@ export function parseProject(text: string): Project {
         });
   if (!validNotes(notes, [...ids, ...annotationIds], identity.pages))
     return fail("note text, geometry, pointers or duplicate IDs");
+  let objectCategories: Record<string, string> | undefined;
+  if (session.objectCategories !== undefined) {
+    if (root.version !== 3)
+      return fail("object categories require project version 3");
+    const entries = Object.entries(
+      object(session.objectCategories, "object categories"),
+    );
+    if (entries.length > 21000) return fail("object category count");
+    const owners = new Set(
+      [...shapes, ...notes, ...pageLegends].map((s) => s.id),
+    );
+    if (
+      entries.some(
+        ([id, category]) =>
+          !owners.has(id) || typeof category !== "string" || !ids.has(category),
+      )
+    )
+      return fail("object category relationship");
+    if (entries.length)
+      objectCategories = Object.fromEntries(entries) as Record<string, string>;
+  }
   const drawing = style(session.drawing),
     activeLegendId = relationship(session.activeLegendId);
   if (
     activeLegendId !== null &&
-    legends.find((l) => l.id === activeLegendId)!.color !== drawing.color
+    (legends.find((l) => l.id === activeLegendId)!.color !== drawing.color ||
+      legends.some((l) => l.id === activeLegendId && (l.hidden || l.locked)))
   )
     return fail("active legend/drawing color");
   return {
     format: "pdf-markup-project",
-    version: 2,
+    version: root.version === 3 ? 3 : 2,
     source: identity,
     ...(root.navigation === undefined
       ? {}
       : { navigation: parseNavigation(root.navigation, identity.pages) }),
     session: {
+      ...(objectCategories ? { objectCategories } : {}),
       ...(notes.length ? { notes } : {}),
       legends,
       annotations,
@@ -282,7 +325,13 @@ export function serializeProject(
 ): string {
   const text = JSON.stringify({
     format: "pdf-markup-project",
-    version: 2,
+    version:
+      session.objectCategories ||
+      session.legends.some(
+        (l) => l.hidden !== undefined || l.locked !== undefined,
+      )
+        ? 3
+        : 2,
     source,
     session,
     ...(navigation ? { navigation } : {}),

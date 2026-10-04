@@ -7,6 +7,7 @@ import { highlightGroups } from "../../services/annotationEditing";
 import { shapePath } from "../../services/shapes";
 import NoteGraphic from "../Annotations/NoteGraphic";
 import PageLegendGraphic from "../Annotations/PageLegendGraphic";
+import { objectVisible } from "../../services/categoryPolicy";
 
 export default function PageThumbnail({
   page,
@@ -58,13 +59,17 @@ export default function PageThumbnail({
       node.height = 0;
     };
   }, [page, scale]);
-  const strokes = session.annotations.filter((s) => s.page === page.pageNumber);
-  const shapes = (session.shapes ?? []).filter(
-    (s) => s.page === page.pageNumber,
+  const strokes = session.annotations.filter(
+    (s) => s.page === page.pageNumber && objectVisible(session, s.id),
   );
-  const notes = (session.notes ?? []).filter((n) => n.page === page.pageNumber);
+  const shapes = (session.shapes ?? []).filter(
+    (s) => s.page === page.pageNumber && objectVisible(session, s.id),
+  );
+  const notes = (session.notes ?? []).filter(
+    (n) => n.page === page.pageNumber && objectVisible(session, n.id),
+  );
   const keys = (session.pageLegends ?? []).filter(
-    (k) => k.page === page.pageNumber,
+    (k) => k.page === page.pageNumber && objectVisible(session, k.id),
   );
   const count = strokes.length + shapes.length + notes.length + keys.length;
   // Tiny previews should not process enormous paths or thousands of text glyphs.
