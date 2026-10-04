@@ -1,0 +1,45 @@
+# Architecture
+
+PDF Markup is a Windows desktop application, with a React/TypeScript editor in
+Tauri's WebView2 frontend and Rust handling authorized local file operations.
+
+```mermaid
+flowchart LR
+  UI[React editor] --> State[Session and undo history]
+  UI --> Render[PDF.js rendering]
+  State --> Worker[PDF export worker]
+  Worker --> Bridge[Binary native bridge]
+  Bridge --> Files[Rust identity checks and atomic writes]
+  Files --> Project[Portable .pmarkup]
+  Files --> PDF[Annotated PDF]
+  Files --> Print[Isolated print preview]
+```
+
+- `src/components/`: controls, PDF navigation, raster tiles, vector overlays.
+- `src/services/`: project schema, geometry, undo, preferences, loading/export.
+- `src-tauri/src/`: portable container, scoped persistence, recents, printing.
+- `tests/`: frontend unit/component tests; Rust tests live beside native code.
+- `scripts/`: asset provisioning, release checks, checksums, benchmarks.
+
+Coordinates are stored in PDF space. Rotation, crop boxes, user units, zoom,
+and scrolling are handled at the view boundary. Overlays and export reuse
+the same geometry/layout functions. Rendering bounds the full-page raster
+and adds detail only for the visible area.
+
+Committed annotations belong to the session. Pointer/input drafts are separate
+until committed; history groups a continuous resize or slider drag into one
+operation. Save, export, and print snapshot committed state and cancel pending
+gestures without applying unfinished text/property drafts.
+
+Portable projects contain a versioned container, validated JSON metadata, and
+the original PDF bytes. The native layer checks length and SHA-256 identity,
+extracts embedded PDFs to owned temporary files, and prevents source-PDF
+replacement through aliases or hard links. Legacy project references never
+authorize a new filesystem path.
+
+Export runs in a dedicated worker and preserves original PDF streams rather
+than rasterizing the document. The full PDF is rewritten. Binary IPC avoids
+JSON arrays; native source verification streams through a bounded buffer.
+
+The application identifier remains `com.orcific.pdf-markup-tool` across
+releases to retain local preferences and recent-files storage.

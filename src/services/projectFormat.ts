@@ -38,6 +38,7 @@ function string(value: unknown, field: string, max = 256): string {
     typeof value !== "string" ||
     !value.length ||
     value.length > max ||
+    // eslint-disable-next-line no-control-regex -- Intentionally reject control characters in user input.
     /[\u0000-\u001f]/.test(value)
   )
     return fail(field);
@@ -76,10 +77,12 @@ function color(value: unknown): string {
     ? result
     : fail("color (lowercase #rrggbb required)");
 }
+
 function array(value: unknown, field: string, max: number): unknown[] {
   if (!Array.isArray(value) || value.length > max) return fail(field);
   return value;
 }
+
 function style(value: unknown) {
   const v = object(value, "drawing style");
   return {
@@ -266,6 +269,7 @@ export function parseProject(text: string): Project {
     },
   };
 }
+
 export function serializeProject(
   source: SourceIdentity,
   session: AnnotationSession,
@@ -279,12 +283,14 @@ export function serializeProject(
   parseProject(text);
   return text;
 }
+
 export async function hashBytes(bytes: Uint8Array): Promise<string> {
   const hash = await crypto.subtle.digest("SHA-256", new Uint8Array(bytes));
   return Array.from(new Uint8Array(hash), (byte) =>
     byte.toString(16).padStart(2, "0"),
   ).join("");
 }
+
 export function sameSource(
   expected: SourceIdentity,
   actual: SourceIdentity,

@@ -1,23 +1,16 @@
 mod persistence;
 mod portable;
-mod recent;
 mod printing;
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
+mod recent;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(portable::EmbeddedSources::default())
         .manage(recent::RecentFiles::default())
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            greet,
             printing::print_annotated_pdf,
             recent::list_recent_files,
             recent::remember_recent_file,

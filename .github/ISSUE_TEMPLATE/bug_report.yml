@@ -1,0 +1,26 @@
+name: Bug report
+description: Report a reproducible problem using non-sensitive sample data.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "For security vulnerabilities, follow SECURITY.md. Do not attach private PDFs or projects."
+  - type: input
+    id: version
+    attributes:
+      label: App version and Windows/WebView2 versions
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include expected and actual behavior using a synthetic document.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized screenshots or logs
+      description: Include file size/page count if relevant, but no confidential files.

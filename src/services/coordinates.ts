@@ -18,34 +18,55 @@ export function viewportToPdf(point: Point, viewport: PageViewport): Point {
   return { x, y };
 }
 
-export function clientToPdf(point: Point, rect: PageRect, viewport: PageViewport): Point {
-  return viewportToPdf({
-    x: (point.x - rect.left) * viewport.width / rect.width,
-    y: (point.y - rect.top) * viewport.height / rect.height,
-  }, viewport);
+export function clientToPdf(
+  point: Point,
+  rect: PageRect,
+  viewport: PageViewport,
+): Point {
+  return viewportToPdf(
+    {
+      x: ((point.x - rect.left) * viewport.width) / rect.width,
+      y: ((point.y - rect.top) * viewport.height) / rect.height,
+    },
+    viewport,
+  );
 }
 
-export function pdfToClient(point: Point, rect: PageRect, viewport: PageViewport): Point {
+export function pdfToClient(
+  point: Point,
+  rect: PageRect,
+  viewport: PageViewport,
+): Point {
   const position = pdfToViewport(point, viewport);
   return {
-    x: rect.left + position.x * rect.width / viewport.width,
-    y: rect.top + position.y * rect.height / viewport.height,
+    x: rect.left + (position.x * rect.width) / viewport.width,
+    y: rect.top + (position.y * rect.height) / viewport.height,
   };
 }
 
 export type ZoomMode = "manual" | "page" | "width";
 export const MIN_ZOOM = 0.1;
 export const MAX_ZOOM = 32;
-export const clampZoom = (scale: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale));
+export const clampZoom = (scale: number) =>
+  Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale));
 
 // Fit modes deliberately allow scales below the manual minimum for huge sheets.
-export function fitScale(page: Size, available: Size, mode: "page" | "width"): number {
+export function fitScale(
+  page: Size,
+  available: Size,
+  mode: "page" | "width",
+): number {
   const width = Math.max(1, available.width) / page.width;
-  return mode === "width" ? width : Math.min(width, Math.max(1, available.height) / page.height);
+  return mode === "width"
+    ? width
+    : Math.min(width, Math.max(1, available.height) / page.height);
 }
 
 // Convert a raw PDF width through the viewport, including rotation and UserUnit.
-export function pdfWidthToViewport(width: number, viewport: PageViewport): number {
+export function pdfWidthToViewport(
+  width: number,
+  viewport: PageViewport,
+): number {
   const origin = pdfToViewport({ x: 0, y: 0 }, viewport);
   const unit = pdfToViewport({ x: 1, y: 0 }, viewport);
   return width * Math.hypot(unit.x - origin.x, unit.y - origin.y);

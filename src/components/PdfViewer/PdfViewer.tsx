@@ -34,7 +34,9 @@ export default function PdfViewer({ file }: Props) {
         if (isCancelled) return;
 
         const resolvedPages = await Promise.all(
-          Array.from({ length: pdf.numPages }, (_, index) => pdf.getPage(index + 1)),
+          Array.from({ length: pdf.numPages }, (_, index) =>
+            pdf.getPage(index + 1),
+          ),
         );
 
         if (!isCancelled) {
@@ -77,7 +79,10 @@ export default function PdfViewer({ file }: Props) {
 
   if (error) {
     return (
-      <div role="alert" className="flex flex-1 items-center justify-center text-red-700">
+      <div
+        role="alert"
+        className="flex flex-1 items-center justify-center text-red-700"
+      >
         {error}
       </div>
     );

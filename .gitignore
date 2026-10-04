@@ -84,3 +84,14 @@ coverage/
 
 internal_docs/
 public/pdfjs/
+public/THIRD_PARTY_LICENSES.txt
+public/RUST_LICENSES.txt
+# Private documents and deploy artifacts belong outside source control.
+*.pmarkup
+*.pfx
+*.p12
+*.pem
+*.key
+*.pdf
+src-tauri/icons/android/
+src-tauri/icons/ios/

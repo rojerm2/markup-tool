@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build verified Windows release
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      CARGO_BUILD_JOBS: 1
+      CARGO_PROFILE_DEV_DEBUG: 0
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.96.1 --profile minimal --component rustfmt --component clippy
+      - run: npm ci
+      - run: npm run check:release
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test -- --maxWorkers=1
+      - run: npm audit --omit=dev --audit-level=high
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Build and optionally sign installer
+        env:
+          SIGNING_THUMBPRINT: ${{ vars.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        shell: pwsh
+        run: |
+          if ($env:SIGNING_THUMBPRINT) {
+            if ($env:SIGNING_THUMBPRINT -notmatch '^[a-fA-F0-9]{40}$') { throw 'Invalid certificate thumbprint' }
+            @{ bundle = @{ windows = @{ certificateThumbprint = $env:SIGNING_THUMBPRINT; digestAlgorithm = 'sha256'; timestampUrl = 'http://timestamp.digicert.com'; tsp = $true } } } | ConvertTo-Json -Depth 6 | Set-Content signing-config.json
+            npm run tauri build -- --bundles nsis --config signing-config.json
+          } else {
+            npm run tauri build -- --bundles nsis
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
+      - name: Verify publisher signatures when configured
+        if: ${{ vars.WINDOWS_CERTIFICATE_THUMBPRINT != '' }}
+        env:
+          SIGNING_THUMBPRINT: ${{ vars.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: ./scripts/verify-windows-signatures.ps1 -Thumbprint $env:SIGNING_THUMBPRINT
+      - run: npm run release:checksums
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNING_THUMBPRINT: ${{ vars.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        shell: pwsh
+        run: |
+          $taskVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $taskNotes = Get-Content -LiteralPath ("docs/releases/v" + $taskVersion + ".md") -Raw
+          $taskStatus = if ($env:SIGNING_THUMBPRINT) { "Authenticode signed and timestamped." } else { "Unsigned build; publisher certificate not configured." }
+          ($taskNotes + "`n`n## Artifact signature`n`n" + $taskStatus) | Set-Content -LiteralPath release-notes.md
+          $taskAssets = @(Get-ChildItem -LiteralPath src-tauri/target/release/bundle/nsis -File | Where-Object { $_.Name.EndsWith("_" + $taskVersion + "_x64-setup.exe") -or $_.Name -eq 'SHA256SUMS.txt' } | ForEach-Object { $_.FullName })
+          gh release create $env:GITHUB_REF_NAME @taskAssets --repo $env:GITHUB_REPOSITORY --verify-tag --draft --title ("PDF Markup " + $taskVersion) --notes-file release-notes.md
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }

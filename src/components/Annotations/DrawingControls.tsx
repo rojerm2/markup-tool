@@ -1,39 +1,96 @@
-import { showStrokePreview } from '../../services/strokePreview';
-import WidthControl from './WidthControl';
-import type { SessionHistory } from '../../services/sessionHistory';
+import { showStrokePreview } from "../../services/strokePreview";
+import WidthControl from "./WidthControl";
+import type { SessionHistory } from "../../services/sessionHistory";
 
 export const COLORS = [
-  { name: 'Yellow', value: '#facc15' },
-  { name: 'Green', value: '#4ade80' },
-  { name: 'Blue', value: '#38bdf8' },
-  { name: 'Pink', value: '#f472b6' },
-  { name: 'Red', value: '#ef4444' },
-  { name: 'Orange', value: '#fb923c' },
-  { name: 'Lime', value: '#a3e635' },
-  { name: 'Teal', value: '#2dd4bf' },
-  { name: 'Indigo', value: '#818cf8' },
-  { name: 'Purple', value: '#c084fc' },
-  { name: 'Brown', value: '#a87951' },
-  { name: 'Gray', value: '#94a3b8' },
+  { name: "Yellow", value: "#facc15" },
+  { name: "Green", value: "#4ade80" },
+  { name: "Blue", value: "#38bdf8" },
+  { name: "Pink", value: "#f472b6" },
+  { name: "Red", value: "#ef4444" },
+  { name: "Orange", value: "#fb923c" },
+  { name: "Lime", value: "#a3e635" },
+  { name: "Teal", value: "#2dd4bf" },
+  { name: "Indigo", value: "#818cf8" },
+  { name: "Purple", value: "#c084fc" },
+  { name: "Brown", value: "#a87951" },
+  { name: "Gray", value: "#94a3b8" },
 ];
-export const WIDTHS = [{ name: 'Thin', value: 5 }, { name: 'Medium', value: 10 }, { name: 'Thick', value: 20 }];
-export type DrawingStyle = { color: string; width: number; opacity: number; rounding?: number };
-export const DEFAULT_DRAWING: DrawingStyle = { color: COLORS[0].value, width: 10, opacity: 0.4 };
+export const WIDTHS = [
+  { name: "Thin", value: 5 },
+  { name: "Medium", value: 10 },
+  { name: "Thick", value: 20 },
+];
+export type DrawingStyle = {
+  color: string;
+  width: number;
+  opacity: number;
+  rounding?: number;
+};
+export const DEFAULT_DRAWING: DrawingStyle = {
+  color: COLORS[0].value,
+  width: 10,
+  opacity: 0.4,
+};
 
-export default function DrawingControls({ value, history, onChange }: { value: DrawingStyle; history?: SessionHistory; onChange: (value: DrawingStyle, manual: boolean) => void }) {
-  return <div className="drawing-controls" role="toolbar" aria-label="Drawing controls">
-    <span className="tool-status">New strokes</span>
-    <div className="control-group" role="group" aria-label="Stroke width">
-      <WidthControl value={value.width} color={value.color} history={history} onChange={width => onChange({ ...value, width }, false)} />
-      {WIDTHS.map(width => <button key={width.value} aria-pressed={value.width === width.value}
-        title={`${width.value} PDF units`} onClick={e => { showStrokePreview(e.target,{...value,width:width.value}); onChange({ ...value, width: width.value }, false); }}>{width.name}</button>)}
+export default function DrawingControls({
+  value,
+  history,
+  onChange,
+}: {
+  value: DrawingStyle;
+  history?: SessionHistory;
+  onChange: (value: DrawingStyle, manual: boolean) => void;
+}) {
+  return (
+    <div
+      className="drawing-controls"
+      role="toolbar"
+      aria-label="Drawing controls"
+    >
+      <span className="tool-status">New strokes</span>
+      <div className="control-group" role="group" aria-label="Stroke width">
+        <WidthControl
+          value={value.width}
+          color={value.color}
+          history={history}
+          onChange={(width) => onChange({ ...value, width }, false)}
+        />
+        {WIDTHS.map((width) => (
+          <button
+            key={width.value}
+            aria-pressed={value.width === width.value}
+            title={`${width.value} PDF units`}
+            onClick={(e) => {
+              showStrokePreview(e.target, { ...value, width: width.value });
+              onChange({ ...value, width: width.value }, false);
+            }}
+          >
+            {width.name}
+          </button>
+        ))}
+      </div>
+      <div className="control-group" role="group" aria-label="Highlight color">
+        <span className="control-label">Color</span>
+        {COLORS.map((color) => (
+          <button
+            key={color.value}
+            className="color-swatch"
+            aria-label={color.name}
+            title={color.name}
+            aria-pressed={value.color === color.value}
+            onClick={(e) => {
+              showStrokePreview(e.target, { ...value, color: color.value });
+              onChange({ ...value, color: color.value }, true);
+            }}
+          >
+            <span style={{ background: color.value }}>
+              {value.color === color.value ? "✓" : ""}
+            </span>
+            {color.name}
+          </button>
+        ))}
+      </div>
     </div>
-    <div className="control-group" role="group" aria-label="Highlight color">
-      <span className="control-label">Color</span>
-      {COLORS.map(color => <button key={color.value} className="color-swatch" aria-label={color.name}
-        title={color.name} aria-pressed={value.color === color.value} onClick={e => { showStrokePreview(e.target,{...value,color:color.value}); onChange({ ...value, color: color.value }, true); }}>
-        <span style={{ background: color.value }}>{value.color === color.value ? '✓' : ''}</span>{color.name}
-      </button>)}
-    </div>
-  </div>;
+  );
 }

@@ -1,7 +1,14 @@
 // @vitest-environment node
 import { expect, it } from "vitest";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
-import { clientToPdf, pdfToClient, pdfToViewport, viewportToPdf, fitScale, pdfWidthToViewport } from "../src/services/coordinates";
+import {
+  clientToPdf,
+  pdfToClient,
+  pdfToViewport,
+  viewportToPdf,
+  fitScale,
+  pdfWidthToViewport,
+} from "../src/services/coordinates";
 
 // A tiny two-page vector PDF built without an additional PDF-writing dependency.
 function fixture(rotation = 90, cropped = false, userUnit = 1) {
@@ -21,7 +28,10 @@ function fixture(rotation = 90, cropped = false, userUnit = 1) {
   });
   const xref = pdf.length;
   pdf += `xref\n0 6\n0000000000 65535 f \n`;
-  pdf += offsets.slice(1).map(offset => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  pdf += offsets
+    .slice(1)
+    .map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`)
+    .join("");
   pdf += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
   return new TextEncoder().encode(pdf);
 }
@@ -40,41 +50,70 @@ it("real PDF.js parses two local pages, including rotation, without changing sou
     expect([rotated.width, rotated.height]).toEqual([100, 200]);
     expect((await first.getOperatorList()).fnArray.length).toBeGreaterThan(0);
     expect(original).toEqual(before);
-  } finally { await task.destroy(); }
+  } finally {
+    await task.destroy();
+  }
 });
 
 it("real PDF.js rejects corrupt input", async () => {
   const task = getDocument({ data: new TextEncoder().encode("Not a PDF") });
-  try { await expect(task.promise).rejects.toThrow(); }
-  finally { await task.destroy(); }
+  try {
+    await expect(task.promise).rejects.toThrow();
+  } finally {
+    await task.destroy();
+  }
 });
 
 it.each([
-  [0, 20, 80], [90, 20, 20], [180, 180, 20], [270, 80, 180],
-])("preserves cropped PDF coordinates at rotation %i across zoom and client offsets", async (rotation, x, y) => {
-  const task = getDocument({ data: fixture(rotation, true) });
-  try {
-    const page = await (await task.promise).getPage(2);
-    expect(page.view).toEqual([20, 30, 220, 130]);
-    for (const scale of [0.1, 1, 2, 8]) {
-      const viewport = page.getViewport({ scale });
-      const stored = { x: 40, y: 50 };
-      expect(pdfToViewport(stored, viewport)).toEqual({ x: x * scale, y: y * scale });
-      for (const point of [stored, { x: 20, y: 30 }, { x: 220, y: 130 }, { x: -15.5, y: 140.25 }]) {
-        const converted = viewportToPdf(pdfToViewport(point, viewport), viewport);
-        expect(converted.x).toBeCloseTo(point.x, 8);
-        expect(converted.y).toBeCloseTo(point.y, 8);
-        // Client rectangles include scrolling/pan and possible CSS scaling;
-        // none of these affect the persisted PDF point.
-        const rect = { left: -350, top: 71, width: viewport.width * 0.75, height: viewport.height * 0.75 };
-        const client = pdfToClient(point, rect, viewport);
-        const result = clientToPdf(client, rect, viewport);
-        expect(result.x).toBeCloseTo(point.x, 8);
-        expect(result.y).toBeCloseTo(point.y, 8);
+  [0, 20, 80],
+  [90, 20, 20],
+  [180, 180, 20],
+  [270, 80, 180],
+])(
+  "preserves cropped PDF coordinates at rotation %i across zoom and client offsets",
+  async (rotation, x, y) => {
+    const task = getDocument({ data: fixture(rotation, true) });
+    try {
+      const page = await (await task.promise).getPage(2);
+      expect(page.view).toEqual([20, 30, 220, 130]);
+      for (const scale of [0.1, 1, 2, 8]) {
+        const viewport = page.getViewport({ scale });
+        const stored = { x: 40, y: 50 };
+        expect(pdfToViewport(stored, viewport)).toEqual({
+          x: x * scale,
+          y: y * scale,
+        });
+        for (const point of [
+          stored,
+          { x: 20, y: 30 },
+          { x: 220, y: 130 },
+          { x: -15.5, y: 140.25 },
+        ]) {
+          const converted = viewportToPdf(
+            pdfToViewport(point, viewport),
+            viewport,
+          );
+          expect(converted.x).toBeCloseTo(point.x, 8);
+          expect(converted.y).toBeCloseTo(point.y, 8);
+          // Client rectangles include scrolling/pan and possible CSS scaling;
+          // none of these affect the persisted PDF point.
+          const rect = {
+            left: -350,
+            top: 71,
+            width: viewport.width * 0.75,
+            height: viewport.height * 0.75,
+          };
+          const client = pdfToClient(point, rect, viewport);
+          const result = clientToPdf(client, rect, viewport);
+          expect(result.x).toBeCloseTo(point.x, 8);
+          expect(result.y).toBeCloseTo(point.y, 8);
+        }
       }
+    } finally {
+      await task.destroy();
     }
-  } finally { await task.destroy(); }
-});
+  },
+);
 
 it("uses PDF UserUnit and rotated crop dimensions when fitting a sheet", async () => {
   const task = getDocument({ data: fixture(90, true, 2) });
@@ -82,57 +121,183 @@ it("uses PDF UserUnit and rotated crop dimensions when fitting a sheet", async (
     const page = await (await task.promise).getPage(2);
     const viewport = page.getViewport({ scale: 1 });
     expect([viewport.width, viewport.height]).toEqual([200, 400]);
-    for (const scale of [.1, 1, 2, 8]) {
-      expect(pdfWidthToViewport(20, page.getViewport({ scale }))).toBeCloseTo(40 * scale);
+    for (const scale of [0.1, 1, 2, 8]) {
+      expect(pdfWidthToViewport(20, page.getViewport({ scale }))).toBeCloseTo(
+        40 * scale,
+      );
     }
     expect(pdfToViewport({ x: 40, y: 50 }, viewport)).toEqual({ x: 40, y: 40 });
     expect(fitScale(viewport, { width: 600, height: 400 }, "page")).toBe(1);
     expect(fitScale(viewport, { width: 600, height: 400 }, "width")).toBe(3);
-    expect(fitScale({ width: 100000, height: 100000 }, { width: 600, height: 400 }, "page")).toBe(0.004);
-  } finally { await task.destroy(); }
-});
-
-it('serialized vectors retain independently expected crop/rotation/UserUnit alignment at multiple zooms', async () => {
-  const { parseProject, serializeProject } = await import('../src/services/projectFormat');
-  const { emptySession } = await import('../src/services/annotationSession');
-  for (const rotation of [0,90,180,270]) {
-    const task = getDocument({data:fixture(rotation,true,2)});
-    try {
-      const pdf=await task.promise, page=await pdf.getPage(2);
-      const restored=parseProject(serializeProject({reference:'floor.pdf',filename:'floor.pdf',sha256:'a'.repeat(64),size:123,pages:2},
-        {...emptySession,annotations:[{id:'stable',legendId:null,page:2,type:'freehand',points:[{x:20,y:30},{x:220,y:130}],width:10,color:'#facc15',opacity:0.4}]}));
-      const stroke=restored.session.annotations[0];
-      const expected: Record<number, number[][]>={0:[[0,200],[400,0]],90:[[0,0],[200,400]],180:[[400,0],[0,200]],270:[[200,400],[0,0]]};
-      for (const scale of [0.1,1,2,8]) {
-        const viewport=page.getViewport({scale});
-        stroke.points.forEach((point,i)=>{const projected=pdfToViewport(point,viewport); expect(projected.x).toBeCloseTo(expected[rotation][i][0]*scale); expect(projected.y).toBeCloseTo(expected[rotation][i][1]*scale);});
-        expect(pdfWidthToViewport(stroke.width,viewport)).toBeCloseTo(20*scale);
-      }
-    } finally {await task.destroy();}
+    expect(
+      fitScale(
+        { width: 100000, height: 100000 },
+        { width: 600, height: 400 },
+        "page",
+      ),
+    ).toBe(0.004);
+  } finally {
+    await task.destroy();
   }
 });
 
-it.each([0,90,180,270])('moves with independent raw coordinates through real crop/UserUnit/rotation %i at multiple zooms',async rotation=>{
-  const { translatedHighlight }=await import('../src/services/annotationEditing');
-  const task=getDocument({data:fixture(rotation,true,2)});
-  try {
-    const page=await (await task.promise).getPage(2);
-    const stroke={id:'move',page:2,type:'freehand' as const,legendId:null,color:'#facc15',width:10,opacity:.4,points:[{x:40,y:50},{x:90.125,y:60.875},{x:75.25,y:90.5}]};
-    // Raw start (40,50) projects to these independently computed crop positions.
-    const start={0:[20,80],90:[20,20],180:[180,20],270:[80,180]}[rotation]!;
-    // Client translation +12,-8 corresponds to the following raw deltas / (zoom*UserUnit).
-    const delta={0:[12,8],90:[-8,12],180:[-12,-8],270:[8,-12]}[rotation]!;
-    for(const scale of [.1,1,2,8]) {
-      const viewport=page.getViewport({scale});const rect={left:31,top:-17,width:viewport.width,height:viewport.height};
-      // Scale the mouse translation so the raw expected result is identical at each zoom.
-      const end={x:rect.left+(start[0]+12)*scale*2,y:rect.top+(start[1]-8)*scale*2};
-      const moved=translatedHighlight(stroke,{x:40,y:50},end,rect,viewport);
-      moved.points.forEach((p,i)=>{expect(p.x).toBeCloseTo(stroke.points[i].x+delta[0],10);expect(p.y).toBeCloseTo(stroke.points[i].y+delta[1],10);});
-      expect(moved).toMatchObject({id:'move',page:2,type:'freehand',legendId:null,width:10,opacity:.4});
-      // A second move back uses the new committed snapshot, without quantizing coordinates.
-      const back=translatedHighlight(moved,{x:40+delta[0],y:50+delta[1]},
-        {x:rect.left+start[0]*scale*2,y:rect.top+start[1]*scale*2},rect,viewport);
-      back.points.forEach((p,i)=>{expect(p.x).toBeCloseTo(stroke.points[i].x,10);expect(p.y).toBeCloseTo(stroke.points[i].y,10);});
+it("serialized vectors retain independently expected crop/rotation/UserUnit alignment at multiple zooms", async () => {
+  const { parseProject, serializeProject } =
+    await import("../src/services/projectFormat");
+  const { emptySession } = await import("../src/services/annotationSession");
+  for (const rotation of [0, 90, 180, 270]) {
+    const task = getDocument({ data: fixture(rotation, true, 2) });
+    try {
+      const pdf = await task.promise,
+        page = await pdf.getPage(2);
+      const restored = parseProject(
+        serializeProject(
+          {
+            reference: "floor.pdf",
+            filename: "floor.pdf",
+            sha256: "a".repeat(64),
+            size: 123,
+            pages: 2,
+          },
+          {
+            ...emptySession,
+            annotations: [
+              {
+                id: "stable",
+                legendId: null,
+                page: 2,
+                type: "freehand",
+                points: [
+                  { x: 20, y: 30 },
+                  { x: 220, y: 130 },
+                ],
+                width: 10,
+                color: "#facc15",
+                opacity: 0.4,
+              },
+            ],
+          },
+        ),
+      );
+      const stroke = restored.session.annotations[0];
+      const expected: Record<number, number[][]> = {
+        0: [
+          [0, 200],
+          [400, 0],
+        ],
+        90: [
+          [0, 0],
+          [200, 400],
+        ],
+        180: [
+          [400, 0],
+          [0, 200],
+        ],
+        270: [
+          [200, 400],
+          [0, 0],
+        ],
+      };
+      for (const scale of [0.1, 1, 2, 8]) {
+        const viewport = page.getViewport({ scale });
+        stroke.points.forEach((point, i) => {
+          const projected = pdfToViewport(point, viewport);
+          expect(projected.x).toBeCloseTo(expected[rotation][i][0] * scale);
+          expect(projected.y).toBeCloseTo(expected[rotation][i][1] * scale);
+        });
+        expect(pdfWidthToViewport(stroke.width, viewport)).toBeCloseTo(
+          20 * scale,
+        );
+      }
+    } finally {
+      await task.destroy();
     }
-  } finally {await task.destroy();}
+  }
 });
+
+it.each([0, 90, 180, 270])(
+  "moves with independent raw coordinates through real crop/UserUnit/rotation %i at multiple zooms",
+  async (rotation) => {
+    const { translatedHighlight } =
+      await import("../src/services/annotationEditing");
+    const task = getDocument({ data: fixture(rotation, true, 2) });
+    try {
+      const page = await (await task.promise).getPage(2);
+      const stroke = {
+        id: "move",
+        page: 2,
+        type: "freehand" as const,
+        legendId: null,
+        color: "#facc15",
+        width: 10,
+        opacity: 0.4,
+        points: [
+          { x: 40, y: 50 },
+          { x: 90.125, y: 60.875 },
+          { x: 75.25, y: 90.5 },
+        ],
+      };
+      // Raw start (40,50) projects to these independently computed crop positions.
+      const start = {
+        0: [20, 80],
+        90: [20, 20],
+        180: [180, 20],
+        270: [80, 180],
+      }[rotation]!;
+      // Client translation +12,-8 corresponds to the following raw deltas / (zoom*UserUnit).
+      const delta = { 0: [12, 8], 90: [-8, 12], 180: [-12, -8], 270: [8, -12] }[
+        rotation
+      ]!;
+      for (const scale of [0.1, 1, 2, 8]) {
+        const viewport = page.getViewport({ scale });
+        const rect = {
+          left: 31,
+          top: -17,
+          width: viewport.width,
+          height: viewport.height,
+        };
+        // Scale the mouse translation so the raw expected result is identical at each zoom.
+        const end = {
+          x: rect.left + (start[0] + 12) * scale * 2,
+          y: rect.top + (start[1] - 8) * scale * 2,
+        };
+        const moved = translatedHighlight(
+          stroke,
+          { x: 40, y: 50 },
+          end,
+          rect,
+          viewport,
+        );
+        moved.points.forEach((p, i) => {
+          expect(p.x).toBeCloseTo(stroke.points[i].x + delta[0], 10);
+          expect(p.y).toBeCloseTo(stroke.points[i].y + delta[1], 10);
+        });
+        expect(moved).toMatchObject({
+          id: "move",
+          page: 2,
+          type: "freehand",
+          legendId: null,
+          width: 10,
+          opacity: 0.4,
+        });
+        // A second move back uses the new committed snapshot, without quantizing coordinates.
+        const back = translatedHighlight(
+          moved,
+          { x: 40 + delta[0], y: 50 + delta[1] },
+          {
+            x: rect.left + start[0] * scale * 2,
+            y: rect.top + start[1] * scale * 2,
+          },
+          rect,
+          viewport,
+        );
+        back.points.forEach((p, i) => {
+          expect(p.x).toBeCloseTo(stroke.points[i].x, 10);
+          expect(p.y).toBeCloseTo(stroke.points[i].y, 10);
+        });
+      }
+    } finally {
+      await task.destroy();
+    }
+  },
+);

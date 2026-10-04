@@ -2,11 +2,23 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { PDFPageProxy } from "pdfjs-dist";
 
 import type { ReactNode } from "react";
-import DetailTile from './DetailTile';
+import DetailTile from "./DetailTile";
 
-type Props = { page: PDFPageProxy; scale?: number; children?: ReactNode; active?: boolean; pixelBudget?: number };
+type Props = {
+  page: PDFPageProxy;
+  scale?: number;
+  children?: ReactNode;
+  active?: boolean;
+  pixelBudget?: number;
+};
 
-export default function PdfPage({ page, scale = 1.25, children, active = true, pixelBudget = 16_000_000 }: Props) {
+export default function PdfPage({
+  page,
+  scale = 1.25,
+  children,
+  active = true,
+  pixelBudget = 16_000_000,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,9 +33,11 @@ export default function PdfPage({ page, scale = 1.25, children, active = true, p
     setError(null);
     const viewport = page.getViewport({ scale });
     // Bound allocation for very large engineering sheets.
-    const ratio = Math.min(window.devicePixelRatio || 1,
+    const ratio = Math.min(
+      window.devicePixelRatio || 1,
       8192 / Math.max(viewport.width, viewport.height),
-      Math.sqrt(pixelBudget / (viewport.width * viewport.height)));
+      Math.sqrt(pixelBudget / (viewport.width * viewport.height)),
+    );
     canvas.width = Math.max(1, Math.floor(viewport.width * ratio));
     canvas.height = Math.max(1, Math.floor(viewport.height * ratio));
     canvas.style.width = `${viewport.width}px`;
@@ -31,26 +45,43 @@ export default function PdfPage({ page, scale = 1.25, children, active = true, p
     const context = canvas.getContext("2d");
     if (!context) {
       setError("Canvas rendering is unavailable.");
-      return () => { canvas.remove(); canvas.width = 0; canvas.height = 0; };
+      return () => {
+        canvas.remove();
+        canvas.width = 0;
+        canvas.height = 0;
+      };
     }
     let cancelled = false;
-    let task: ReturnType<PDFPageProxy['render']>;
+    let task: ReturnType<PDFPageProxy["render"]>;
     try {
-      task = page.render({ canvas, canvasContext: context, viewport,
-        transform: [ratio, 0, 0, ratio, 0, 0] });
+      task = page.render({
+        canvas,
+        canvasContext: context,
+        viewport,
+        transform: [ratio, 0, 0, ratio, 0, 0],
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      return () => { canvas.remove(); canvas.width = 0; canvas.height = 0; };
+      return () => {
+        canvas.remove();
+        canvas.width = 0;
+        canvas.height = 0;
+      };
     }
     void task.promise.catch((err: unknown) => {
-      if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      if (!cancelled)
+        setError(err instanceof Error ? err.message : String(err));
     });
     return () => {
       cancelled = true;
       task.cancel();
       canvas.remove();
-      canvas.width = 0; canvas.height = 0;
-      void task.promise.catch(() => {}).then(() => page.cleanup?.()).catch(error => console.error("PDF page cleanup failed", error));
+      canvas.width = 0;
+      canvas.height = 0;
+      void task.promise
+        .catch(() => {})
+        .then(() => page.cleanup?.())
+        .catch((error) => console.error("PDF page cleanup failed", error));
     };
   }, [page, scale, active, pixelBudget]);
   const viewport = page.getViewport({ scale });
@@ -58,8 +89,28 @@ export default function PdfPage({ page, scale = 1.25, children, active = true, p
   return (
     <section aria-label={`Page ${page.pageNumber}`}>
       <p className="page-label">Page {page.pageNumber}</p>
-      {error && <p role="alert">Could not render page {page.pageNumber}: {error}</p>}
-      <div className="page-surface" style={{ width: viewport.width, height: viewport.height, background: "white" }}><div ref={hostRef} /><DetailTile page={page} scale={scale} active={active} pixelBudget={pixelBudget} />{children}</div>
+      {error && (
+        <p role="alert">
+          Could not render page {page.pageNumber}: {error}
+        </p>
+      )}
+      <div
+        className="page-surface"
+        style={{
+          width: viewport.width,
+          height: viewport.height,
+          background: "white",
+        }}
+      >
+        <div ref={hostRef} />
+        <DetailTile
+          page={page}
+          scale={scale}
+          active={active}
+          pixelBudget={pixelBudget}
+        />
+        {children}
+      </div>
     </section>
   );
 }
