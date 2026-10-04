@@ -78,6 +78,7 @@ Desktop.ini
 
 # Coverage
 coverage/
+.cache/
 
 # TypeScript
 *.tsbuildinfo

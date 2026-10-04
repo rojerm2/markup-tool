@@ -4,6 +4,8 @@ Versioned changes follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-04
+
 ### Added
 
 - Read-only PDF revision comparison with synchronized side-by-side views,
@@ -25,6 +27,8 @@ Versioned changes follow [Semantic Versioning](https://semver.org/).
 - Bounded recovery retention, automatic checkpoint retries, and cleanup after
   Save, Discard and interrupted writes.
 - Corresponding font source and provenance checks in build/distribution assets.
+- Repeatable Windows Rust dependency audits using a checksum-verified tool;
+  development dependencies are included in npm security checks.
 - Collapsible Pages, Bookmarks and searchable Markups navigation, with bounded
   thumbnail previews and direct selection of off-page annotations.
 - Project bookmarks and restored page, zoom and PDF-space view position without
@@ -64,5 +68,6 @@ Earlier commits contain the development history for portable projects,
 highlighter/shapes/text editing, large-PDF export, focus handling,
 undo/redo, dark mode, zoom, sounds, and recent files.
 
+[0.4.0]: https://github.com/rojerm2/markup-tool/releases/tag/v0.4.0
 [0.3.0]: https://github.com/rojerm2/markup-tool/releases/tag/v0.3.0
 [0.2.6]: https://github.com/rojerm2/markup-tool/commit/b14aa6b

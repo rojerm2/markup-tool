@@ -131,7 +131,7 @@ To create the Windows installer:
 npm run tauri build -- --bundles nsis
 ```
 
-Run `npm run release:checksums`, then copy `src-tauri/target/release/bundle/nsis/pdf-markup-tool_0.3.0_x64-setup.exe` to another 64-bit Windows computer and run it. Launch **PDF Markup** from the Start menu after installation. Node.js and Rust are not needed on that computer. The installer can download Microsoft WebView2 if it is missing.
+Run `npm run release:checksums`, then copy `src-tauri/target/release/bundle/nsis/pdf-markup-tool_0.4.0_x64-setup.exe` to another 64-bit Windows computer and run it. Launch **PDF Markup** from the Start menu after installation. Node.js and Rust are not needed on that computer. The installer can download Microsoft WebView2 if it is missing.
 
 ## Validation
 
