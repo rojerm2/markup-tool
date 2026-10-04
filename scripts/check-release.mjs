@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 
 const json = (path) => JSON.parse(fs.readFileSync(path, "utf8"));
 const pkg = json("package.json");
@@ -41,4 +42,11 @@ for (const file of [
 ]) {
   assert.ok(fs.existsSync(file), `Missing release file: ${file}`);
 }
+assert.equal(
+  createHash("sha256")
+    .update(fs.readFileSync("third_party/nsis/COPYING"))
+    .digest("hex"),
+  "e7dd514003ab96cb3ddccbc028fe5c795fccf57dc41f21cfb9d4dd16ead23bf5",
+  "NSIS notice must retain the verified upstream bytes",
+);
 console.log(`Release metadata verified: v${version}`);

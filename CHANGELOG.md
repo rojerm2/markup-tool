@@ -4,6 +4,16 @@ Versioned changes follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-04
+
+### Fixed
+
+- Preserve the verified upstream NSIS notice byte for byte and check its digest
+  before packaging, preventing silent Git line-ending conversion.
+- Use deterministic LF line endings for application and font license text.
+
+Includes the feature set prepared for 0.4.0, whose release draft was not published.
+
 ## [0.4.0] - 2026-10-04
 
 ### Added
@@ -68,6 +78,7 @@ Earlier commits contain the development history for portable projects,
 highlighter/shapes/text editing, large-PDF export, focus handling,
 undo/redo, dark mode, zoom, sounds, and recent files.
 
-[0.4.0]: https://github.com/rojerm2/markup-tool/releases/tag/v0.4.0
+[0.4.1]: https://github.com/rojerm2/markup-tool/releases/tag/v0.4.1
+[0.4.0]: https://github.com/rojerm2/markup-tool/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rojerm2/markup-tool/releases/tag/v0.3.0
 [0.2.6]: https://github.com/rojerm2/markup-tool/commit/b14aa6b

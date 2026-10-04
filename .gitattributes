@@ -1,4 +1,6 @@
 * text=auto
+LICENSE text eol=lf
+*.LICENSE text eol=lf
 *.ts text eol=lf
 *.tsx text eol=lf
 *.js text eol=lf
