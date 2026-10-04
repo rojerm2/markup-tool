@@ -11,6 +11,8 @@ type Transaction = {
   label: string;
 };
 const labels: Record<SessionAction["type"], string> = {
+  "tool-styles": "Drawing tool styles",
+  "category-preset": "Add preset categories",
   bulk: "Edit selection",
   "calibrate-page": "Calibrate page",
   "put-measurement": "Draw/edit measurement",

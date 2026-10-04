@@ -442,6 +442,11 @@ function AppContent() {
   }
   const shortcuts = useRef<(e: KeyboardEvent) => void>(() => {});
   shortcuts.current = (e) => {
+    if (
+      e.target instanceof Element &&
+      e.target.closest('dialog, [role="dialog"], [role="alertdialog"]')
+    )
+      return;
     if ((e.ctrlKey || e.metaKey) && ["p", "s"].includes(e.key.toLowerCase())) {
       e.preventDefault();
       if (!locked.current && live.current) {

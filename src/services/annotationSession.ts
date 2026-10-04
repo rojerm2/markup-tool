@@ -9,6 +9,7 @@ import {
 } from "./pageLegend";
 import type { Highlight } from "../types/annotation";
 import { objectExists, objectLocked } from "./categoryPolicy";
+import { parseToolStyles, type ToolStyles } from "./toolStyles";
 import {
   MAX_MEASUREMENTS,
   validMeasurement,
@@ -29,6 +30,7 @@ export type Legend = {
   locked?: boolean;
 };
 export type AnnotationSession = {
+  toolStyles?: ToolStyles;
   measurements?: Measurement[];
   calibrations?: PageCalibration[];
   objectCategories?: Record<string, string>;
@@ -68,6 +70,8 @@ export function legendNameError(
   return null;
 }
 export type SingleSessionAction =
+  | { type: "tool-styles"; styles: ToolStyles; before: ToolStyles | undefined }
+  | { type: "category-preset"; legends: Legend[]; before: Legend[] }
   | {
       type: "calibrate-page";
       page: number;
@@ -109,6 +113,8 @@ export type SingleSessionAction =
   | { type: "commit"; stroke: Highlight };
 
 export type BulkLabel =
+  | "Apply preset"
+  | "Place symbol"
   | "Move selection"
   | "Delete selection"
   | "Duplicate markups"
@@ -160,6 +166,8 @@ export function sessionReducer(
         "Duplicate markups",
         "Paste markups",
         "Assign category",
+        "Apply preset",
+        "Place symbol",
       ].includes(action.label)
     )
       return state;
@@ -181,6 +189,9 @@ export function sessionReducer(
           "move-stroke",
           "commit",
           "assign-category",
+          "category-preset",
+          "tool-styles",
+          "drawing",
         ].includes(item.type)
       )
         return state;
@@ -257,6 +268,46 @@ export function sessionReducer(
     ...(n.type === "text" ? n.pointers.map((p) => p.id) : []),
   ]);
   switch (action.type) {
+    case "tool-styles": {
+      if (action.before !== state.toolStyles) return state;
+      try {
+        return { ...state, toolStyles: parseToolStyles(action.styles) };
+      } catch {
+        return state;
+      }
+    }
+    case "category-preset": {
+      if (
+        action.before !== state.legends ||
+        !Array.isArray(action.legends) ||
+        !action.legends.length ||
+        action.legends.length > 256 ||
+        state.legends.length + action.legends.length > 1000
+      )
+        return state;
+      const legends = [...state.legends];
+      for (const l of action.legends) {
+        if (
+          !l ||
+          typeof l.id !== "string" ||
+          !l.id ||
+          l.id.length > 256 ||
+          // eslint-disable-next-line no-control-regex -- Preset IDs must be portable and control-free.
+          /[\u0000-\u001f]/.test(l.id) ||
+          typeof l.name !== "string" ||
+          noteIds.includes(l.id) ||
+          objectExists(state, l.id) ||
+          legends.some((v) => v.id === l.id) ||
+          !validColor(l.color) ||
+          legendNameError(legends, l.name) ||
+          l.hidden !== undefined ||
+          l.locked !== undefined
+        )
+          return state;
+        legends.push({ id: l.id, name: l.name.trim(), color: l.color });
+      }
+      return { ...state, legends };
+    }
     case "calibrate-page": {
       const before = state.calibrations?.find((c) => c.page === action.page);
       if (

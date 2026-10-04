@@ -166,7 +166,7 @@ One local run measured default parsing/saving at 7.34 seconds and optimized PDF 
 
 ## Project storage
 
-Portable projects contain an 8-byte `PMARKUP` magic/version marker, a little-endian 32-bit metadata length, a little-endian 64-bit PDF length, project JSON, and the original PDF bytes. Metadata uses version 2 for ordinary annotations, version 3 when category protection or non-highlight category assignments are present, and version 4 for measurements or page calibrations. Legacy JSON project versions 1 and 2 can still be read.
+Portable projects contain an 8-byte `PMARKUP` magic/version marker, a little-endian 32-bit metadata length, a little-endian 64-bit PDF length, project JSON, and the original PDF bytes. Metadata uses version 2 for ordinary annotations, version 3 when category protection or non-highlight category assignments are present, and version 4 for measurements, page calibrations or saved drawing defaults. Legacy JSON project versions 1 and 2 can still be read.
 
 The application limits annotation metadata to 16 MiB and the included PDF to 256 MiB. It checks the included PDF's size and SHA-256 identity before opening it, extracts only to an application-generated temporary file, and saves atomically using a temporary sibling file. Embedded filenames do not authorize access to other local files.
 
@@ -183,6 +183,35 @@ Right-click offers application actions: undo/redo, markup tools, selected-object
 A green check confirms project saves; a blue outgoing arrow confirms exports. Both display the resulting filename, can be dismissed, and respect reduced-motion settings. Highlighter width and color controls show a temporary dot on the visible page at the actual stroke thickness for the current zoom. This preview is not a saved markup and disappears when drawing begins.
 
 The actual user-supplied floor-plan benchmark (96,382,176 bytes, 37 pages) generated an annotated PDF in about **2.45 seconds** on this machine, excluding native transfer and file writing. A desktop export took about **11.7 seconds** from destination confirmation to the final file write while a release build was also running. It preserved all **4,413 original PDF streams** byte-for-byte, page sizes, crop boxes, and rotations. The original file remained unchanged. Run the local benchmark with `PDF_MARKUP_REAL_PDF` set to the PDF path; the private file and generated outputs are excluded from Git.
+
+## Reusable presets
+
+Open **Presets** to save drawing styles and category sets to a local library.
+Enter a name and choose **Save current settings**. The library holds up to 24
+presets and 4 MiB in total. Replacing a matching name requires enabling
+**Replace existing preset**. Saving a preset does not save or change the project.
+
+Choose a saved preset or **Import preset** to preview it before applying.
+Choose whether to apply drawing styles, add categories, or both. Existing
+markups keep their appearance. Matching category names and colors are reused;
+name conflicts create a numbered category rather than replacing an existing
+one. Reused categories retain their hidden and locked states. **Apply preset**
+is one undoable operation. Shape and measurement drawing defaults also persist
+in portable projects and can be undone.
+
+Select up to 100 highlights, shapes, text notes or arrows on one page, then open
+**Presets**, choose a saved preset, enter a symbol name and choose **Save selected
+markups as symbol**. Preview the symbol and choose **Place on current page** to
+insert it near the visible page center with fresh object IDs. Choose whether to
+import its categories. Placement is one undoable operation. Measurements,
+calibration and page legends cannot be saved as symbols.
+
+**Export preset** produces a portable `.pmpreset` file of at most 1 MiB. It
+contains drawing geometry, styles and category names, but no source PDF, source
+file path, bookmarks or calibration. Symbols can contain text from your
+selection; review them before sharing. No network connection is needed.
+Invalid imports and storage failures appear in the dialog. A corrupt local
+library is left intact rather than automatically replaced.
 
 ## Local recovery
 

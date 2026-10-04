@@ -98,7 +98,7 @@ fn checked_destination(path: &Path, source: &Path) -> Result<PathBuf, String> {
     }
     Ok(target)
 }
-fn atomic_write(
+pub(crate) fn atomic_write(
     path: &Path,
     bytes: &[u8],
     before_replace: impl FnOnce() -> Result<(), String>,

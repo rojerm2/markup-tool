@@ -6,6 +6,11 @@ Versioned changes follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Local reusable drawing presets, category sets and original symbol groups;
+  portable bounded `.pmpreset` import/export, previews, explicit replacement,
+  conflict-safe category mapping and atomic undo for applying and placing.
+- Portable, undoable shape and measurement drawing defaults.
+
 - Debounced local crash checkpoints and startup recovery of unsaved projects,
   including a verified PDF snapshot without repeated large-file copies.
 - Bounded recovery retention, automatic checkpoint retries, and cleanup after

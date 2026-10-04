@@ -8,6 +8,7 @@ import {
 import { validShape, MAX_SHAPES, SHAPE_DEFAULTS, type Shape } from "./shapes";
 import { validPageLegend, type PageLegend } from "./pageLegend";
 import type { AnnotationSession } from "./annotationSession";
+import { parseToolStyles } from "./toolStyles";
 import { parseNavigation, type DocumentNavigation } from "./documentNavigation";
 import {
   MAX_MEASUREMENTS,
@@ -134,6 +135,12 @@ export function parseProject(text: string): Project {
   };
 
   const session = object(root.session, "session");
+  if (session.toolStyles !== undefined && root.version !== 4)
+    return fail("tool styles require project version 4");
+  const toolStyles =
+    session.toolStyles === undefined
+      ? undefined
+      : parseToolStyles(session.toolStyles);
   const ids = new Set<string>(),
     names = new Set<string>();
   const legends = array(session.legends, "legends", 1000).map((item) => {
@@ -370,6 +377,7 @@ export function parseProject(text: string): Project {
       ? {}
       : { navigation: parseNavigation(root.navigation, identity.pages) }),
     session: {
+      ...(toolStyles ? { toolStyles } : {}),
       ...(measurements.length ? { measurements } : {}),
       ...(calibrations.length ? { calibrations } : {}),
       ...(objectCategories ? { objectCategories } : {}),
@@ -392,7 +400,7 @@ export function serializeProject(
   const text = JSON.stringify({
     format: "pdf-markup-project",
     version:
-      session.measurements || session.calibrations
+      session.measurements || session.calibrations || session.toolStyles
         ? 4
         : session.objectCategories ||
             session.legends.some(

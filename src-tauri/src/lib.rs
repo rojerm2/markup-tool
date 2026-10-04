@@ -1,5 +1,6 @@
 mod persistence;
 mod portable;
+mod presets;
 mod printing;
 mod recent;
 mod recovery;
@@ -13,6 +14,8 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            presets::read_preset,
+            presets::write_preset,
             printing::print_annotated_pdf,
             recent::list_recent_files,
             recent::remember_recent_file,

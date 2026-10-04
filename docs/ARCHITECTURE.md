@@ -46,6 +46,18 @@ protect those derived values. Paste carries geometry and style, then uses the
 destination scale and bounds its labels. Measurement/calibration data requires
 schema 4, while older annotation-only projects retain their compatible schema.
 
+Reusable presets are bounded versioned JSON with drawing styles, category
+definitions and original selected-object symbols. They contain no document
+source, view metadata or calibration. Symbol geometry uses a canonical viewport
+and the same validated clipboard transforms as ordinary paste. Applying a
+preset or placing a symbol is a guarded atomic history transaction; name/color
+conflicts add a renamed category instead of mutating an existing definition.
+Shape and measurement defaults are optional schema-4 session data. The local
+library is capped at 24 entries/4 MiB, each portable file at 1 MiB, and each
+symbol at 100 objects. Native reads/writes require the editor window and a
+dialog-authorized path; writes are atomic and reject non-preset replacements.
+Library errors retain the prior data. Imports are previewed before application.
+
 Portable projects contain a versioned container, validated JSON metadata, and
 the original PDF bytes. The native layer checks length and SHA-256 identity,
 extracts embedded PDFs to owned temporary files, and prevents source-PDF

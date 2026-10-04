@@ -10,6 +10,97 @@ import type { PDFPageProxy } from "pdfjs-dist";
 import PdfNavigationView from "../src/components/PdfViewer/PdfNavigationView";
 import { SessionHistory } from "../src/services/sessionHistory";
 import { emptySession } from "../src/services/annotationSession";
+import {
+  applyPreset,
+  capturePreset,
+  writePresetLibrary,
+} from "../src/services/presets";
+import { DEFAULT_TOOL_STYLES } from "../src/services/toolStyles";
+
+it("keeps preset dialog shortcuts out of the canvas and places a stored selection with atomic undo", () => {
+  HTMLDialogElement.prototype.showModal = function () {
+    this.setAttribute("open", "");
+    this.querySelector<HTMLButtonElement>("button")?.focus();
+  };
+  localStorage.clear();
+  const before = bulkFixture(),
+    history = new SessionHistory(before);
+  writePresetLibrary([capturePreset("Plans", before)]);
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  selectBulkRows();
+  fireEvent.click(screen.getByRole("button", { name: "Presets", exact: true }));
+  const close = screen.getByRole("button", { name: "Close", exact: true });
+  fireEvent.keyDown(close, { key: " ", code: "Space" });
+  expect(
+    screen
+      .getByRole("region", { name: "PDF pages" })
+      .classList.contains("can-pan"),
+  ).toBe(false);
+  fireEvent.keyDown(close, { key: "Delete" });
+  fireEvent.keyDown(close, { key: "a", ctrlKey: true });
+  fireEvent.keyDown(close, { key: "z", ctrlKey: true });
+  expect(history.present).toBe(before);
+  fireEvent.change(screen.getByLabelText("New symbol name"), {
+    target: { value: "Fixture" },
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Save selected markups as symbol" }),
+  );
+  expect(screen.getByRole("img", { name: "Preview of Fixture" })).toBeDefined();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Place on current page" }),
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(history.present.annotations).toHaveLength(2);
+  expect(history.present.shapes).toHaveLength(2);
+  expect(history.undoLabel).toBe("Place symbol");
+  expect(document.activeElement).toBe(
+    screen.getByRole("region", { name: "PDF pages" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Undo", exact: true }));
+  expect(history.present).toBe(before);
+  localStorage.clear();
+});
+
+it("restores preset tool styles in the viewer and undoes/redoes their application without changing existing measurements", () => {
+  measurementRect();
+  const history = new SessionHistory(emptySession),
+    preset = capturePreset("Dimensions", {
+      ...emptySession,
+      toolStyles: {
+        ...DEFAULT_TOOL_STYLES,
+        measurement: { color: "#ff0000", width: 4, fontSize: 24 },
+      },
+    });
+  history.apply(
+    applyPreset(history.present, preset, { styles: true, categories: false })
+      .action!,
+  );
+  const applied = history.present;
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  fireEvent.change(screen.getByLabelText("Measurement tool"), {
+    target: { value: "measure-length" },
+  });
+  expect(
+    (screen.getByLabelText("Measurement text size") as HTMLInputElement).value,
+  ).toBe("24");
+  expect(
+    (screen.getByLabelText("Measurement color") as HTMLInputElement).value,
+  ).toBe("#ff0000");
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(history.present).toBe(emptySession);
+  expect(
+    (screen.getByLabelText("Measurement text size") as HTMLInputElement).value,
+  ).toBe("12");
+  fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+  expect(history.present).toBe(applied);
+  measurementLine();
+  expect(history.present.measurements![0]).toMatchObject({
+    color: "#ff0000",
+    width: 4,
+    fontSize: 24,
+  });
+});
 
 function bulkFixture() {
   return {

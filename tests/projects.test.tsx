@@ -1291,6 +1291,22 @@ it("failed/cancelled saves preserve redo and dirty close locks history until can
   expect(status()).toContain("Saved");
 });
 
+it("does not save or print the background project from preset dialog shortcuts", async () => {
+  render(<App />);
+  await openPdf();
+  click("Presets");
+  const button = screen
+    .getByRole("dialog", { name: "Presets" })
+    .querySelector("button")!;
+  fireEvent.keyDown(button, { key: "s", ctrlKey: true });
+  fireEvent.keyDown(button, { key: "p", ctrlKey: true });
+  expect(files.writeProject).not.toHaveBeenCalled();
+  expect(exports.printPdf).not.toHaveBeenCalled();
+  expect(screen.getByRole("dialog", { name: "Presets" })).toBeDefined();
+  click("Close");
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
 it("undo creation clears a stale legend rename target and allows a new category", async () => {
   render(<App />);
   await openPdf();

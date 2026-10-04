@@ -7,7 +7,6 @@ import { noteLocal, moveNote, type TextNote } from "../../services/notes";
 import ShapeOverlay from "../Annotations/ShapeOverlay";
 import ShapeControls from "../Annotations/ShapeControls";
 import {
-  SHAPE_DEFAULTS,
   pickShape,
   moveShape,
   type Shape,
@@ -45,7 +44,10 @@ import {
   type SessionAction,
 } from "../../services/annotationSession";
 
-import { SessionHistory } from "../../services/sessionHistory";
+import { SessionHistory, sameSession } from "../../services/sessionHistory";
+import { DEFAULT_TOOL_STYLES } from "../../services/toolStyles";
+import PresetLibrary from "../Presets/PresetLibrary";
+import { captureSymbol, placeSymbol } from "../../services/presets";
 import {
   historyChangeRegions,
   type ChangeRegion,
@@ -117,6 +119,7 @@ export default function PdfNavigationView({
   const navigationCallback = useRef(onNavigation);
   navigationCallback.current = onNavigation;
   const [documentOpen, setDocumentOpen] = useState(false);
+  const [presetsOpen, setPresetsOpen] = useState(false);
   const documentButton = useRef<HTMLButtonElement>(null);
   const [local] = useState(
     () => new SessionHistory(controlled ?? emptySession),
@@ -207,11 +210,13 @@ export default function PdfNavigationView({
   const [selectedMeasurement, setSelectedMeasurement] = useState<string | null>(
     null,
   );
-  const [measurementStyle, setMeasurementStyle] = useState<MeasurementStyle>({
-    color: "#0284c7",
-    width: 2,
-    fontSize: 12,
-  });
+  const toolStyles = session.toolStyles ?? DEFAULT_TOOL_STYLES,
+    measurementStyle = toolStyles.measurement;
+  const setMeasurementStyle = (measurement: MeasurementStyle) => {
+    const styles = { ...toolStyles, measurement };
+    if (!sameSession(styles, toolStyles))
+      dispatch({ type: "tool-styles", before: session.toolStyles, styles });
+  };
   const currentMeasurement = session.measurements?.find(
     (m) => m.id === selectedMeasurement,
   );
@@ -246,8 +251,12 @@ export default function PdfNavigationView({
       window.removeEventListener("keydown", key);
     };
   }, [history]);
-  const [shapeStyle, setShapeStyle] =
-    useState<Pick<Shape, "color" | "width" | "fill">>(SHAPE_DEFAULTS);
+  const shapeStyle = toolStyles.shape,
+    setShapeStyle = (shape: Pick<Shape, "color" | "width" | "fill">) => {
+      const styles = { ...toolStyles, shape };
+      if (!sameSession(styles, toolStyles))
+        dispatch({ type: "tool-styles", before: session.toolStyles, styles });
+    };
   const currentShape = session.shapes?.find((s) => s.id === selectedShape);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   useEffect(() => {
@@ -357,9 +366,14 @@ export default function PdfNavigationView({
     if (selectedId && !annotations.some((s) => s.id === selectedId))
       setSelectedId(null);
   }, [annotations, selectedId]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (disabled) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest('dialog, [role="dialog"], [role="alertdialog"]')
+      )
+        return;
       const key = event.key.toLowerCase();
       if (
         !isEditingControl(event.target) &&
@@ -1698,6 +1712,21 @@ export default function PdfNavigationView({
           Pages & markups
         </button>
         <button
+          disabled={disabled}
+          aria-haspopup="dialog"
+          onClick={() => {
+            history.cancelSnapshotDrafts();
+            history.invalidate();
+            setCalibrationCandidate(undefined);
+            setEditingNote(null);
+            setPointerPlacement(null);
+            setPlacing(false);
+            setPresetsOpen(true);
+          }}
+        >
+          Presets
+        </button>
+        <button
           className="properties-toggle"
           ref={panelButton}
           aria-expanded={panelOpen}
@@ -1717,6 +1746,46 @@ export default function PdfNavigationView({
           </span>
         )}
       </div>
+      {presetsOpen && (
+        <PresetLibrary
+          session={session}
+          onApply={dispatch}
+          onCapture={(name) => {
+            const objects = selectedObjects(history.present, selectionIds);
+            const page = objects[0].value.page;
+            return captureSymbol(
+              name,
+              history.present,
+              selectionIds,
+              pages[page - 1].getViewport({ scale: 1 }),
+            );
+          }}
+          onPlace={(symbol, categories) => {
+            const viewport = pages[current - 1].getViewport({ scale: 1 });
+            const center =
+              captureView().center ??
+              viewportToPdf(
+                { x: viewport.width / 2, y: viewport.height / 2 },
+                viewport,
+              );
+            const result = placeSymbol(
+              history.present,
+              symbol,
+              current,
+              viewport,
+              center,
+              categories,
+            );
+            dispatch(result.action);
+            selectGroup(result.ids);
+            setBulkMessage(`Placed ${symbol.name} on page ${current}.`);
+          }}
+          onClose={() => {
+            setPresetsOpen(false);
+            host.current?.focus({ preventScroll: true });
+          }}
+        />
+      )}
       {(selectionIds.length > 0 || clipboard || bulkMessage) && (
         <div
           className="selection-toolbar"
