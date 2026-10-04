@@ -45,6 +45,28 @@ View changes do not create unsaved edits or annotation Undo steps. Local view
 preferences retain up to 12 document identities; they contain no PDF contents
 or annotation data.
 
+## Editing several markups
+
+In **Select/Edit**, hold **Shift** and click markups to add or remove them from
+the selection. The **Markups** list also provides selection checkboxes, including
+for objects on different pages. **Ctrl+A** on the canvas selects editable marks
+on the current page. A selection can contain up to 500 objects.
+
+The selection bar offers **Copy**, **Paste**, **Duplicate**, **Delete selected**,
+and category assignment. **Ctrl+C**, **Ctrl+V**, **Ctrl+D**, and **Delete** also
+work outside text fields. Copy takes marks from one page; navigate to another
+page and paste near the center of its current view. Copy remains available after
+changing pages and is local to the open document, separate from the Windows
+clipboard. Opening another document clears it. Duplicate keeps each mark on its
+own page with a small offset. Each bulk edit uses one Undo step.
+
+Drag the outer selection outline to move the group, or use arrow keys on the
+canvas (2 view units at 100% zoom, or 10 with Shift). Movement respects page
+bounds and includes text pointer targets. Escape, Space, view changes, Save and
+Undo cancel unfinished group drags. Locked or hidden categories cannot be
+selected for bulk edits. Hiding and locking a selected category clears its
+selection; copying never unlocks destination categories.
+
 ## Existing projects
 
 In **Legends**, **Hide/Show** controls workspace visibility; exported PDFs still
@@ -112,7 +134,7 @@ One local run measured default parsing/saving at 7.34 seconds and optimized PDF 
 
 ## Project storage
 
-Portable projects contain an 8-byte `PMARKUP` magic/version marker, a little-endian 32-bit metadata length, a little-endian 64-bit PDF length, project JSON, and the original PDF bytes. Metadata remains compatible with the version 2 annotation schema. Legacy JSON project versions 1 and 2 can still be read.
+Portable projects contain an 8-byte `PMARKUP` magic/version marker, a little-endian 32-bit metadata length, a little-endian 64-bit PDF length, project JSON, and the original PDF bytes. Metadata uses version 2 for ordinary annotations and version 3 when category protection or non-highlight category assignments are present. Legacy JSON project versions 1 and 2 can still be read.
 
 The application limits annotation metadata to 16 MiB and the included PDF to 256 MiB. It checks the included PDF's size and SHA-256 identity before opening it, extracts only to an application-generated temporary file, and saves atomically using a temporary sibling file. Embedded filenames do not authorize access to other local files.
 

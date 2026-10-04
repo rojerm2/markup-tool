@@ -17,8 +17,8 @@ Versioned changes follow [Semantic Versioning](https://semver.org/).
   adding navigation steps to annotation undo history.
 - Undoable category visibility and locking, enforced by the annotation state
   layer and preserved in version 3 projects.
-- Atomic mixed-markup transactions and bounded copy/paste geometry handling
-  for bulk editing.
+- Mixed-markup selection with Shift-click and list checkboxes; group movement,
+  category assignment, duplicate, copy/paste across pages and atomic undo/redo.
 
 ## [0.3.0] - 2026-10-04
 

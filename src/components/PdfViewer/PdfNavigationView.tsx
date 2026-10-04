@@ -19,7 +19,7 @@ import PageLegendControls from "../Annotations/PageLegendControls";
 import { keyMatrix, layoutLegend } from "../../services/pageLegend";
 import { pickHighlight } from "../../services/annotationEditing";
 import { viewportToPdf } from "../../services/coordinates";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PDFPageProxy } from "pdfjs-dist";
 import {
   clampZoom,
@@ -62,6 +62,18 @@ import {
 } from "../../services/documentNavigation";
 import type { MarkupRow } from "../../services/markupList";
 import { objectLocked, objectVisible } from "../../services/categoryPolicy";
+import {
+  copyMarkups,
+  pasteMarkups,
+  duplicateMarkups,
+  deleteMarkups,
+  moveMarkups,
+  movementLimits,
+  selectedObjects,
+  MAX_SELECTION,
+  type MarkupClipboard,
+} from "../../services/bulkEditing";
+import SelectionOverlay from "../Annotations/SelectionOverlay";
 
 const GUTTER = 32;
 const LABEL_HEIGHT = 28;
@@ -150,6 +162,8 @@ export default function PdfNavigationView({
         message: `${direction === "undo" ? "Undid" : "Redid"} ${label}${affected.length ? ` · ${affected.length === 1 ? `Page ${affected[0]}` : `${affected.length} pages`}` : ""}`,
       });
       playActionSound(direction);
+      setMultiSelection([]);
+      setBulkMessage(null);
       setSelectedNote(null);
       setSelectedPointer(null);
       setSelectedShape(null);
@@ -178,6 +192,37 @@ export default function PdfNavigationView({
     useState<Pick<Shape, "color" | "width" | "fill">>(SHAPE_DEFAULTS);
   const currentShape = session.shapes?.find((s) => s.id === selectedShape);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [multiSelection, setMultiSelection] = useState<string[]>([]);
+  const [clipboard, setClipboard] = useState<MarkupClipboard | null>(null);
+  const [bulkMessage, setBulkMessage] = useState<string | null>(null);
+  const selectionIds = multiSelection.length
+    ? multiSelection
+    : [selectedId ?? selectedShape ?? selectedNote ?? selectedKey].filter(
+        (id): id is string => !!id,
+      );
+  const groupObjects = useMemo(() => {
+    if (multiSelection.length < 2) return [];
+    try {
+      return selectedObjects(session, multiSelection);
+    } catch {
+      return [];
+    }
+  }, [session, multiSelection]);
+  const groupLimits = useMemo(
+    () =>
+      groupObjects.length
+        ? movementLimits(groupObjects, session.legends, (p) =>
+            pages[p - 1].getViewport({ scale: 1 }),
+          )
+        : { minX: 0, maxX: 0, minY: 0, maxY: 0 },
+    [groupObjects, session.legends, pages],
+  );
+  useEffect(() => {
+    if (multiSelection.length && !groupObjects.length) setMultiSelection([]);
+  }, [groupObjects, multiSelection.length]);
+  useEffect(() => {
+    if (tool !== "edit") setMultiSelection([]);
+  }, [tool]);
   useEffect(() => {
     if (
       [selectedId, selectedShape, selectedNote, selectedKey].some(
@@ -485,6 +530,197 @@ export default function PdfNavigationView({
       host.current?.focus({ preventScroll: true });
     }
   }
+
+  function selectGroup(ids: string[]) {
+    if (ids.length > MAX_SELECTION) {
+      setBulkMessage(`Select up to ${MAX_SELECTION} markups at once.`);
+      return;
+    }
+    history.invalidate();
+    setBulkMessage(null);
+    setSelectedId(null);
+    setSelectedShape(null);
+    setSelectedNote(null);
+    setSelectedKey(null);
+    setSelectedPointer(null);
+    setEditingNote(null);
+    setPointerPlacement(null);
+    setPlacing(false);
+    setMultiSelection(ids.length > 1 ? ids : []);
+    if (ids.length === 1) {
+      const object = selectedObjects(history.present, ids)[0];
+      if (object.kind === "highlight") setSelectedId(ids[0]);
+      else if (object.kind === "shape") setSelectedShape(ids[0]);
+      else if (object.kind === "note") setSelectedNote(ids[0]);
+      else setSelectedKey(ids[0]);
+    }
+    setTool("edit");
+  }
+
+  function toggleSelection(id: string) {
+    if (!visible(id) || lockedObject(id)) return;
+    selectGroup(
+      selectionIds.includes(id)
+        ? selectionIds.filter((v) => v !== id)
+        : [...selectionIds, id],
+    );
+  }
+
+  function bulkOperation(task: () => void) {
+    try {
+      task();
+    } catch (error) {
+      setBulkMessage(error instanceof Error ? error.message : String(error));
+      playActionSound("error");
+    }
+  }
+
+  function copySelection() {
+    bulkOperation(() => {
+      const objects = selectedObjects(session, selectionIds),
+        page = objects[0].value.page;
+      setClipboard(
+        copyMarkups(
+          session,
+          selectionIds,
+          pages[page - 1].getViewport({ scale: 1 }),
+        ),
+      );
+      setBulkMessage(
+        `Copied ${selectionIds.length} markup${selectionIds.length === 1 ? "" : "s"}.`,
+      );
+    });
+  }
+
+  function pasteSelection() {
+    bulkOperation(() => {
+      if (!clipboard) return;
+      const viewport = pages[current - 1].getViewport({ scale: 1 });
+      const center =
+        captureView().center ??
+        viewportToPdf(
+          { x: viewport.width / 2, y: viewport.height / 2 },
+          viewport,
+        );
+      const result = pasteMarkups(
+        session,
+        clipboard,
+        current,
+        viewport,
+        center,
+      );
+      dispatch(result.action);
+      selectGroup(result.ids);
+      setBulkMessage(
+        `Pasted ${result.ids.length} markup${result.ids.length === 1 ? "" : "s"} on page ${current}.`,
+      );
+    });
+  }
+
+  function duplicateSelection() {
+    bulkOperation(() => {
+      const result = duplicateMarkups(session, selectionIds, (p) =>
+        pages[p - 1].getViewport({ scale: 1 }),
+      );
+      dispatch(result.action);
+      selectGroup(result.ids);
+      setBulkMessage(
+        `Duplicated ${result.ids.length} markup${result.ids.length === 1 ? "" : "s"}.`,
+      );
+    });
+  }
+
+  function deleteSelection() {
+    bulkOperation(() => {
+      dispatch(deleteMarkups(session, selectionIds));
+      selectGroup([]);
+    });
+  }
+
+  function moveSelection(
+    dx: number,
+    dy: number,
+    generation?: number,
+    before = session,
+  ) {
+    bulkOperation(() => {
+      if (history.present !== before) return;
+      dispatch(
+        moveMarkups(before, selectionIds, dx, dy, (p) =>
+          pages[p - 1].getViewport({ scale: 1 }),
+        ),
+        generation,
+      );
+    });
+  }
+  const bulkKey = useRef<(e: KeyboardEvent) => void>(() => {});
+  bulkKey.current = (e) => {
+    if (
+      disabled ||
+      !(e.target instanceof Node) ||
+      !root.current?.contains(e.target) ||
+      (isEditingControl(e.target) &&
+        !(e.target instanceof Element && e.target.closest(".markup-select")))
+    )
+      return;
+    const key = e.key.toLowerCase(),
+      control = (e.ctrlKey || e.metaKey) && !e.altKey;
+    let action: (() => void) | undefined;
+    if (control && key === "v" && clipboard) action = pasteSelection;
+    else if (control && key === "c" && selectionIds.length)
+      action = copySelection;
+    else if (control && key === "d" && selectionIds.length)
+      action = duplicateSelection;
+    else if (control && key === "a" && host.current?.contains(e.target))
+      action = () =>
+        selectGroup(
+          [
+            ...session.annotations,
+            ...(session.shapes ?? []),
+            ...(session.notes ?? []),
+            ...(session.pageLegends ?? []),
+          ]
+            .filter(
+              (o) => o.page === current && visible(o.id) && !lockedObject(o.id),
+            )
+            .map((o) => o.id),
+        );
+    else if (
+      multiSelection.length &&
+      (e.key === "Delete" || e.key === "Backspace")
+    )
+      action = deleteSelection;
+    else if (multiSelection.length && e.key === "Escape")
+      action = () => selectGroup([]);
+    else if (
+      multiSelection.length &&
+      !control &&
+      !e.altKey &&
+      host.current?.contains(e.target)
+    ) {
+      const delta: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+      };
+      if (delta[e.key]) {
+        const [x, y] = delta[e.key],
+          distance = e.shiftKey ? 10 : 2;
+        action = () => moveSelection(x * distance, y * distance);
+      }
+    }
+    if (action) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      action();
+    }
+  };
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => bulkKey.current(e);
+    window.addEventListener("keydown", key, true);
+    return () => window.removeEventListener("keydown", key, true);
+  }, []);
   const panelButton = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLElement>(null);
   const focusPanel = useRef(false);
@@ -708,7 +944,15 @@ export default function PdfNavigationView({
       return;
     }
     setViewRevision((v) => v + 1);
-    if (clearSelection) setSelectedId(null);
+    if (clearSelection) {
+      setMultiSelection([]);
+      setSelectedId(null);
+      setSelectedShape(null);
+      setSelectedNote(null);
+      setSelectedKey(null);
+      setSelectedPointer(null);
+      setEditingNote(null);
+    }
     const element = host.current;
     const target = element?.querySelector<HTMLElement>(
       `[data-page="${number}"]`,
@@ -961,6 +1205,7 @@ export default function PdfNavigationView({
   }, [session.shapes, selectedShape]);
 
   function selectShape(id: string | null) {
+    setMultiSelection([]);
     if (id && (!visible(id) || lockedObject(id))) return;
     setSelectedNote(null);
     history.invalidate();
@@ -975,6 +1220,7 @@ export default function PdfNavigationView({
   }
 
   function selectStroke(id: string | null) {
+    setMultiSelection([]);
     if (id && (!visible(id) || lockedObject(id))) return;
     setSelectedNote(null);
     const stroke = annotations.find((s) => s.id === id);
@@ -984,7 +1230,12 @@ export default function PdfNavigationView({
     setSelectedId(stroke?.id ?? null);
   }
 
-  function selectNote(id: string, pointer?: string) {
+  function selectNote(id: string, pointer?: string, additive = false) {
+    if (additive) {
+      toggleSelection(id);
+      return;
+    }
+    setMultiSelection([]);
     if (id && (!visible(id) || lockedObject(id))) return;
     if (id !== selectedNote || (pointer ?? null) !== selectedPointer)
       history.invalidate();
@@ -1087,6 +1338,7 @@ export default function PdfNavigationView({
                 ? "remove-shape"
                 : "remove-stroke";
           history.invalidate();
+          setMultiSelection([]);
           setPlacing(false);
           setSelectedKey(key?.id ?? null);
           setSelectedNote(key ? null : (note?.id ?? null));
@@ -1293,9 +1545,100 @@ export default function PdfNavigationView({
           </span>
         )}
       </div>
+      {(selectionIds.length > 0 || clipboard || bulkMessage) && (
+        <div
+          className="selection-toolbar"
+          role="toolbar"
+          aria-label="Selected markups"
+        >
+          <span>{selectionIds.length} selected</span>
+          <button
+            disabled={disabled || !selectionIds.length}
+            onClick={() => {
+              copySelection();
+              host.current?.focus({ preventScroll: true });
+            }}
+            title="Copy selected markups (Ctrl+C)"
+          >
+            Copy
+          </button>
+          <button
+            disabled={disabled || !clipboard}
+            onClick={() => {
+              pasteSelection();
+              host.current?.focus({ preventScroll: true });
+            }}
+            title="Paste on the current page (Ctrl+V)"
+          >
+            Paste
+          </button>
+          <button
+            disabled={disabled || !selectionIds.length}
+            onClick={() => {
+              duplicateSelection();
+              host.current?.focus({ preventScroll: true });
+            }}
+            title="Duplicate selected markups (Ctrl+D)"
+          >
+            Duplicate
+          </button>
+          <button
+            disabled={disabled || !selectionIds.length}
+            onClick={() => {
+              deleteSelection();
+              host.current?.focus({ preventScroll: true });
+            }}
+          >
+            Delete selected
+          </button>
+          <select
+            aria-label="Selection category"
+            value=""
+            disabled={disabled || !selectionIds.length}
+            onChange={(e) => {
+              const categoryId =
+                e.target.value === "unassigned"
+                  ? null
+                  : e.target.value.replace(/^category:/, "");
+              bulkOperation(() =>
+                dispatch({
+                  type: "assign-category",
+                  ids: selectionIds,
+                  categoryId,
+                }),
+              );
+              host.current?.focus({ preventScroll: true });
+            }}
+          >
+            <option value="" disabled>
+              Assign category…
+            </option>
+            <option value="unassigned">Unassigned</option>
+            {session.legends.map((l) => (
+              <option key={l.id} value={`category:${l.id}`}>
+                {l.name}
+                {l.hidden ? " (Hidden)" : ""}
+                {l.locked ? " (Locked)" : ""}
+              </option>
+            ))}
+          </select>
+          <button
+            disabled={disabled || !selectionIds.length}
+            onClick={() => {
+              selectGroup([]);
+              host.current?.focus({ preventScroll: true });
+            }}
+          >
+            Clear selection
+          </button>
+          {bulkMessage && <span role="status">{bulkMessage}</span>}
+        </div>
+      )}
       <div className="workspace-body">
         {documentOpen && (
           <DocumentPanel
+            selected={selectionIds}
+            toggleSelection={toggleSelection}
             pages={pages}
             current={current}
             session={session}
@@ -1475,6 +1818,7 @@ export default function PdfNavigationView({
               setSelectedId(null);
             }}
             onSelect={(id) => {
+              setMultiSelection([]);
               setSelectedNote(null);
               const k = session.pageLegends?.find((k) => k.id === id);
               if (k && k.page !== current) navigate(k.page);
@@ -1500,8 +1844,14 @@ export default function PdfNavigationView({
               event.button === 0 &&
               event.target instanceof Element &&
               !event.target.closest(".annotation-overlay")
-            )
+            ) {
+              setMultiSelection([]);
               setSelectedId(null);
+              setSelectedShape(null);
+              setSelectedNote(null);
+              setSelectedKey(null);
+              setSelectedPointer(null);
+            }
           }}
         >
           <div className="pdf-pages">
@@ -1534,7 +1884,12 @@ export default function PdfNavigationView({
                       history={history}
                       tool={tool === "edit" ? "edit" : "highlight"}
                       selectedId={selectedId}
-                      onSelect={(id) => {
+                      onSelect={(id, additive) => {
+                        if (additive && id) {
+                          toggleSelection(id);
+                          return;
+                        }
+                        setMultiSelection([]);
                         setSelectedNote(null);
                         setSelectedShape(null);
                         setSelectedId(id);
@@ -1582,7 +1937,12 @@ export default function PdfNavigationView({
                         fill: tool === "line" ? null : shapeStyle.fill,
                       }}
                       selected={selectedShape}
-                      onSelect={(id) => {
+                      onSelect={(id, additive) => {
+                        if (additive && id) {
+                          toggleSelection(id);
+                          return;
+                        }
+                        setMultiSelection([]);
                         setSelectedNote(null);
                         setSelectedShape(id);
                         setSelectedId(null);
@@ -1633,7 +1993,12 @@ export default function PdfNavigationView({
                         setPanelOpen(true);
                       }}
                       selected={selectedKey}
-                      onSelect={(id) => {
+                      onSelect={(id, additive) => {
+                        if (additive) {
+                          toggleSelection(id);
+                          return;
+                        }
+                        setMultiSelection([]);
                         setSelectedNote(null);
                         setSelectedShape(null);
                         setSelectedKey(id);
@@ -1649,6 +2014,23 @@ export default function PdfNavigationView({
                       <StrokeSizePreview
                         {...strokePreview}
                         viewport={viewport}
+                      />
+                    )}
+                    {groupObjects.some(
+                      (o) => o.value.page === page.pageNumber,
+                    ) && (
+                      <SelectionOverlay
+                        objects={groupObjects.filter(
+                          (o) => o.value.page === page.pageNumber,
+                        )}
+                        session={session}
+                        viewport={viewport}
+                        scale={scales[index]}
+                        limits={groupLimits}
+                        history={history}
+                        disabled={disabled || pan.className.includes("can-pan")}
+                        revision={viewRevision}
+                        onMove={moveSelection}
                       />
                     )}
                     {historyFeedback && (

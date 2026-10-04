@@ -8,6 +8,7 @@ import {
   type MarkupRow,
 } from "../../services/markupList";
 import PageThumbnail from "./PageThumbnail";
+import { objectLocked, objectVisible } from "../../services/categoryPolicy";
 
 const ROW_HEIGHT = 224;
 type Tab = "Pages" | "Bookmarks" | "Markups";
@@ -22,6 +23,8 @@ export default function DocumentPanel({
   navigate,
   changeBookmarks,
   reveal,
+  selected = [],
+  toggleSelection,
 }: {
   pages: PDFPageProxy[];
   current: number;
@@ -32,6 +35,8 @@ export default function DocumentPanel({
   navigate: (page: number) => void;
   changeBookmarks: (bookmarks: Bookmark[]) => void;
   reveal: (row: MarkupRow) => void;
+  selected?: string[];
+  toggleSelection?: (id: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>("Pages");
   const [start, setStart] = useState(Math.max(0, current - 2));
@@ -329,6 +334,20 @@ export default function DocumentPanel({
             <ul>
               {filtered.slice(offset, offset + 50).map((r) => (
                 <li key={r.id}>
+                  {toggleSelection && (
+                    <input
+                      type="checkbox"
+                      className="markup-select"
+                      aria-label={`Select ${r.label.slice(0, 100)} on page ${r.page}`}
+                      checked={selected.includes(r.id)}
+                      disabled={
+                        disabled ||
+                        objectLocked(session, r.id) ||
+                        !objectVisible(session, r.id)
+                      }
+                      onChange={() => toggleSelection(r.id)}
+                    />
+                  )}
                   <button
                     disabled={disabled}
                     className="markup-jump"
@@ -343,6 +362,8 @@ export default function DocumentPanel({
                       <strong title={r.label}>{r.label}</strong>
                       <small>
                         Page {r.page} · {r.category}
+                        {!objectVisible(session, r.id) && " · Hidden"}
+                        {objectLocked(session, r.id) && " · Locked"}
                       </small>
                     </span>
                   </button>

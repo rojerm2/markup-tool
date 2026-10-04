@@ -53,7 +53,7 @@ export default function NoteOverlay({
   selected: string | null;
   pointer: string | null;
   placing: string | null;
-  onSelect: (id: string, pointer?: string) => void;
+  onSelect: (id: string, pointer?: string, additive?: boolean) => void;
   onEdit: (n: TextNote) => void;
   onPlaced: () => void;
   dispatch: (a: SessionAction, g?: number) => void;
@@ -206,6 +206,13 @@ export default function NoteOverlay({
       target.closest("[data-note-handle]")?.getAttribute("data-note-handle") ??
       target.closest("[data-pointer-id]")?.getAttribute("data-pointer-id") ??
       null;
+    if (before && !placing && e.shiftKey && !handle) {
+      e.currentTarget
+        .closest<HTMLElement>(".pdf-scroll")
+        ?.focus({ preventScroll: true });
+      onSelect(before.id, undefined, true);
+      return;
+    }
     if (before && !placing)
       onSelect(
         before.id,

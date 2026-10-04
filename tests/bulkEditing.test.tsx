@@ -13,6 +13,11 @@ import {
   copyMarkups,
   pasteMarkups,
   selectedObjects,
+  moveMarkups,
+  movementLimits,
+  selectionBounds,
+  duplicateMarkups,
+  deleteMarkups,
 } from "../src/services/bulkEditing";
 import type { PageViewport } from "../src/services/coordinates";
 
@@ -38,6 +43,87 @@ function viewport(rotation = 0, unit = 1): PageViewport {
             : [x / unit, 800 - y / unit],
   } as unknown as PageViewport;
 }
+
+it("moves a mixed group in visual page coordinates, including pointer targets, and clamps the whole group", () => {
+  const before = fixture(),
+    history = new SessionHistory(before),
+    ids = ["stroke", "shape", "note"];
+  const view = viewport(90, 2),
+    objects = selectedObjects(before, ids);
+  const limits = movementLimits(objects, before.legends, () => view);
+  expect(history.apply(moveMarkups(before, ids, 12, 8, () => view))).toBe(true);
+  expect(history.present.annotations[0].points[0]).toEqual({
+    x: before.annotations[0].points[0].x + 4,
+    y: before.annotations[0].points[0].y + 6,
+  });
+  const note = history.present.notes![0];
+  if (note.type !== "text") throw new Error("Expected text");
+  expect(note.pointers[0].target).toEqual({ x: 14, y: 26 });
+  expect(history.undoLabel).toBe("Move selection");
+  history.traverse("undo");
+  expect(history.present).toBe(before);
+  history.apply(moveMarkups(before, ids, 1e6, 1e6, () => view));
+  const box = selectionBounds(
+    selectedObjects(history.present, ids),
+    before.legends,
+    view,
+  );
+  expect(box.right).toBeLessThanOrEqual(view.width + 1e-8);
+  expect(box.bottom).toBeLessThanOrEqual(view.height + 1e-8);
+  const start = selectionBounds(objects, before.legends, view);
+  expect(box.left - start.left).toBeCloseTo(limits.maxX);
+  expect(box.top - start.top).toBeCloseTo(limits.maxY);
+  expect(() => moveMarkups(before, ids, NaN, 0, () => view)).toThrow(
+    "Invalid movement",
+  );
+});
+
+it("duplicates objects across pages with unique IDs as one transaction and deletes the copies atomically", () => {
+  const original = fixture();
+  const before = {
+    ...original,
+    shapes: [{ ...original.shapes![0], page: 2 }],
+    legends: [{ id: "walls", name: "Walls", color: "#facc15" }],
+    objectCategories: { shape: "walls", note: "walls" },
+  };
+  let counter = 0;
+  const result = duplicateMarkups(
+    before,
+    ["stroke", "shape", "note"],
+    (p) => viewport(p === 2 ? 90 : 0),
+    () => `dup-${++counter}`,
+  );
+  const history = new SessionHistory(before);
+  expect(history.apply(result.action)).toBe(true);
+  expect(history.present.annotations).toHaveLength(2);
+  expect(history.present.shapes!.map((s) => s.page)).toEqual([2, 2]);
+  expect(history.present.notes).toHaveLength(2);
+  expect(history.present.objectCategories?.[history.present.notes![1].id]).toBe(
+    "walls",
+  );
+  expect(history.undoLabel).toBe("Duplicate markups");
+  history.traverse("undo");
+  expect(history.present).toBe(before);
+  expect(history.traverse("undo")).toBe(false);
+  history.traverse("redo");
+  const copied = history.present;
+  expect(history.apply(deleteMarkups(copied, result.ids))).toBe(true);
+  expect(history.present.annotations).toHaveLength(1);
+  expect(history.present.shapes).toHaveLength(1);
+  expect(history.present.notes).toHaveLength(1);
+  history.traverse("undo");
+  expect(history.present).toBe(copied);
+  const protectedState = {
+    ...before,
+    legends: [{ ...before.legends[0], locked: true }],
+  };
+  expect(() =>
+    duplicateMarkups(protectedState, ["stroke", "shape"], () => viewport()),
+  ).toThrow("Unlock and show");
+  expect(() => deleteMarkups(protectedState, ["stroke", "shape"])).toThrow(
+    "Unlock and show",
+  );
+});
 
 it("copies mixed geometry to a rotated page with fresh IDs and one Undo step, preserving nested pointer targets", () => {
   const before = {

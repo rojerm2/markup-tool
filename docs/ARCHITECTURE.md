@@ -31,6 +31,13 @@ until committed; history groups a continuous resize or slider drag into one
 operation. Save, export, and print snapshot committed state and cancel pending
 gestures without applying unfinished text/property drafts.
 
+Bulk edits validate an immutable starting snapshot and every child operation
+before accepting a single history entry. Selection and the bounded, document-local
+clipboard are transient UI state. Paste transforms through source and destination
+PDF viewports, gives objects and nested pointers fresh IDs, checks category policy
+and validates resulting project limits. Hidden categories affect workspace
+rendering only; locks are enforced centrally for every annotation mutation.
+
 Portable projects contain a versioned container, validated JSON metadata, and
 the original PDF bytes. The native layer checks length and SHA-256 identity,
 extracts embedded PDFs to owned temporary files, and prevents source-PDF

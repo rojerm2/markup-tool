@@ -48,7 +48,7 @@ export default function PageLegendOverlay({
   placing: boolean;
   onPlaced: () => void;
   selected: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, additive?: boolean) => void;
   dispatch: (a: SessionAction, g?: number) => void;
   editing: boolean;
   disabled: boolean;
@@ -204,6 +204,14 @@ export default function PageLegendOverlay({
         const before = session.pageLegends?.find((k) => k.id === id);
         if (!before) return;
         if (locked(before.id)) return;
+        if (e.shiftKey && !(e.target as Element).closest("[data-key-handle]")) {
+          e.currentTarget
+            .closest<HTMLElement>(".pdf-scroll")
+            ?.focus({ preventScroll: true });
+          e.preventDefault();
+          onSelect(before.id, true);
+          return;
+        }
         e.preventDefault();
         onSelect(before.id);
         e.currentTarget

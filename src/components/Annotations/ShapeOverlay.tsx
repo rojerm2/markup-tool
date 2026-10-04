@@ -44,7 +44,7 @@ export default function ShapeOverlay({
   tool: "highlight" | "edit" | ShapeKind;
   style: Pick<Shape, "color" | "width" | "fill">;
   selected: string | null;
-  onSelect: (id: string | null) => void;
+  onSelect: (id: string | null, additive?: boolean) => void;
   dispatch: (a: SessionAction, g?: number) => void;
   history: SessionHistory;
   disabled: boolean;
@@ -172,6 +172,15 @@ export default function ShapeOverlay({
         : (pickShape(shapes, client, rect, viewport) ?? undefined);
     if (!creating && !before) return;
     if (before && locked(before.id)) return;
+    if (before && e.shiftKey && !handleElement) {
+      e.currentTarget
+        .closest<HTMLElement>(".pdf-scroll")
+        ?.focus({ preventScroll: true });
+      e.preventDefault();
+      e.stopPropagation();
+      onSelect(before.id, true);
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     const shape: Shape = before ?? {

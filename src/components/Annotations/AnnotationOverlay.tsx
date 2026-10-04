@@ -30,7 +30,7 @@ type Props = {
   legendId?: string | null;
   tool?: "highlight" | "edit";
   selectedId?: string | null;
-  onSelect?: (id: string | null) => void;
+  onSelect?: (id: string | null, additive?: boolean) => void;
   onAction?: (action: SessionAction, generation?: number) => void;
   legends?: Legend[];
   disabled?: boolean;
@@ -243,10 +243,11 @@ export default function AnnotationOverlay({
             viewport,
           );
           if (hit && locked(hit.id)) return;
-          onSelect?.(hit?.id ?? null);
+          onSelect?.(hit?.id ?? null, event.shiftKey);
           event.currentTarget
             .closest<HTMLElement>(".pdf-scroll")
             ?.focus({ preventScroll: true });
+          if (event.shiftKey) return;
           if (hit) {
             event.currentTarget.setPointerCapture(event.pointerId);
             move.current = {

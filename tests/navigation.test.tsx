@@ -11,6 +11,224 @@ import PdfNavigationView from "../src/components/PdfViewer/PdfNavigationView";
 import { SessionHistory } from "../src/services/sessionHistory";
 import { emptySession } from "../src/services/annotationSession";
 
+function bulkFixture() {
+  return {
+    ...emptySession,
+    legends: [{ id: "walls", name: "Walls", color: "#facc15" }],
+    annotations: [
+      {
+        id: "stroke",
+        type: "freehand" as const,
+        page: 1,
+        legendId: null,
+        color: "#facc15",
+        opacity: 0.4,
+        width: 10,
+        points: [
+          { x: 100, y: 200 },
+          { x: 200, y: 200 },
+        ],
+      },
+    ],
+    shapes: [
+      {
+        id: "shape",
+        type: "rectangle" as const,
+        page: 1,
+        a: { x: 100, y: 300 },
+        b: { x: 200, y: 400 },
+        color: "#facc15",
+        width: 2,
+        fill: null,
+      },
+    ],
+  };
+}
+
+function selectBulkRows() {
+  fireEvent.click(screen.getByRole("button", { name: "Pages & markups" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Markups" }));
+  const boxes = Array.from(
+    document.querySelectorAll<HTMLInputElement>(".markup-select"),
+  );
+  boxes.forEach((box) => fireEvent.click(box));
+  return boxes;
+}
+
+it("adds and removes canvas marks with Shift-click, then clears the group on a result jump or background click", () => {
+  vi.spyOn(SVGElement.prototype, "getBoundingClientRect").mockImplementation(
+    function (this: SVGElement) {
+      return this.closest("[data-page]")!
+        .querySelector("canvas")!
+        .getBoundingClientRect();
+    },
+  );
+  const before = bulkFixture(),
+    history = new SessionHistory(before);
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  fireEvent.click(screen.getByRole("button", { name: "Select/Edit" }));
+  const canvas = screen.getByLabelText("PDF page 1"),
+    host = screen.getByRole("region", { name: "PDF pages" });
+  const box = canvas.getBoundingClientRect(),
+    scale = box.width / 600;
+  const hit = () =>
+    fireEvent.pointerDown(screen.getByLabelText("Highlights for page 1"), {
+      pointerId: 8,
+      button: 0,
+      shiftKey: true,
+      clientX: box.left + 150 * scale,
+      clientY: box.top + 600 * scale,
+    });
+  hit();
+  expect(screen.getByText("1 selected")).toBeDefined();
+  fireEvent.pointerDown(
+    screen
+      .getByLabelText("Shapes for page 1")
+      .querySelector('[data-shape-id="shape"]')!,
+    {
+      pointerId: 8,
+      button: 0,
+      shiftKey: true,
+      clientX: box.left + 100 * scale,
+      clientY: box.top + 450 * scale,
+    },
+  );
+  expect(screen.getByText("2 selected")).toBeDefined();
+  expect(document.activeElement).toBe(host);
+  expect(history.present).toBe(before);
+  hit();
+  expect(screen.getByText("1 selected")).toBeDefined();
+  hit();
+  fireEvent.click(screen.getByRole("button", { name: "Pages & markups" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Markups" }));
+  fireEvent.click(document.querySelector(".markup-jump")!);
+  expect(screen.getByText("1 selected")).toBeDefined();
+  expect(screen.queryByLabelText("Selection for page 1")).toBeNull();
+  fireEvent.pointerDown(canvas, { button: 0 });
+  expect(screen.queryByText("1 selected")).toBeNull();
+});
+
+it("copies a mixed selection to another page, preserves typing shortcuts, and pastes with one Undo step", () => {
+  const history = new SessionHistory(bulkFixture());
+  render(<PdfNavigationView pages={[page(1), page(2)]} history={history} />);
+  const boxes = selectBulkRows();
+  expect(screen.getByText("2 selected")).toBeDefined();
+  boxes[1].focus();
+  fireEvent.keyDown(boxes[1], { key: "c", ctrlKey: true });
+  expect(
+    screen.getByRole("button", { name: "Paste" }).hasAttribute("disabled"),
+  ).toBe(false);
+  const search = screen.getByRole("searchbox");
+  search.focus();
+  fireEvent.keyDown(search, { key: "v", ctrlKey: true });
+  expect(history.present.annotations).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+  const host = screen.getByRole("region", { name: "PDF pages" });
+  host.focus();
+  fireEvent.keyDown(host, { key: "v", ctrlKey: true });
+  expect(history.present.annotations).toHaveLength(2);
+  expect(history.present.shapes).toHaveLength(2);
+  expect(history.present.annotations[1].page).toBe(2);
+  expect(history.present.shapes![1].page).toBe(2);
+  expect(screen.getByLabelText("Selection for page 2")).toBeDefined();
+  expect(history.undoLabel).toBe("Paste markups");
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(history.present.annotations).toHaveLength(1);
+  expect(history.present.shapes).toHaveLength(1);
+  expect(screen.queryByText("2 selected")).toBeNull();
+  expect(history.undoLabel).toBeUndefined();
+  fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+  expect(history.present.annotations).toHaveLength(2);
+});
+
+it("nudges, assigns, duplicates and deletes a group atomically without panning or editing locked categories", () => {
+  const before = bulkFixture(),
+    history = new SessionHistory(before);
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  selectBulkRows();
+  const host = screen.getByRole("region", { name: "PDF pages" });
+  host.focus();
+  const scroll = host.scrollLeft;
+  fireEvent.keyDown(host, { key: "ArrowRight" });
+  expect(history.present.annotations[0].points[0].x).toBe(102);
+  expect(history.present.shapes![0].a.x).toBe(102);
+  expect(host.scrollLeft).toBe(scroll);
+  expect(history.undoLabel).toBe("Move selection");
+  fireEvent.keyDown(host, { code: "Space", key: " " });
+  expect(host.className).toContain("can-pan");
+  fireEvent.keyUp(host, { code: "Space", key: " " });
+  fireEvent.change(screen.getByLabelText("Selection category"), {
+    target: { value: "category:walls" },
+  });
+  expect(history.present.annotations[0].legendId).toBe("walls");
+  expect(history.present.objectCategories?.shape).toBe("walls");
+  fireEvent.keyDown(host, { key: "d", ctrlKey: true });
+  expect(history.present.annotations).toHaveLength(2);
+  expect(history.undoLabel).toBe("Duplicate markups");
+  fireEvent.keyDown(host, { key: "Delete" });
+  expect(history.present.annotations).toHaveLength(1);
+  expect(history.undoLabel).toBe("Delete selection");
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(history.present.annotations).toHaveLength(2);
+  fireEvent.click(screen.getByRole("button", { name: "Properties" }));
+  fireEvent.click(screen.getByRole("button", { name: "Legends (1)" }));
+  fireEvent.click(screen.getByRole("button", { name: "Lock category Walls" }));
+  expect(
+    Array.from(
+      document.querySelectorAll<HTMLInputElement>(".markup-select"),
+    ).every((b) => b.disabled),
+  ).toBe(true);
+  host.focus();
+  fireEvent.keyDown(host, { key: "a", ctrlKey: true });
+  expect(screen.queryByText("4 selected")).toBeNull();
+});
+
+it("moves from the group outline in one step and cancels unfinished drag on Save, Space and Undo", () => {
+  const history = new SessionHistory(bulkFixture());
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  selectBulkRows();
+  const overlay = () => screen.getByLabelText("Selection for page 1");
+  const begin = () => {
+    fireEvent.pointerDown(overlay().querySelector("rect:last-child")!, {
+      pointerId: 9,
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+    });
+    fireEvent.pointerMove(overlay(), {
+      pointerId: 9,
+      buttons: 1,
+      clientX: 127,
+      clientY: 100,
+    });
+  };
+  begin();
+  fireEvent.pointerUp(overlay(), { pointerId: 9, clientX: 127, clientY: 100 });
+  expect(history.present.annotations[0].points[0].x).toBeCloseTo(140);
+  expect(history.present.shapes![0].a.x).toBeCloseTo(140);
+  expect(history.undoLabel).toBe("Move selection");
+  const saved = history.present;
+  begin();
+  act(() => history.cancelSnapshotDrafts());
+  fireEvent.pointerUp(overlay(), { pointerId: 9, clientX: 150, clientY: 100 });
+  expect(history.present).toBe(saved);
+  begin();
+  fireEvent.keyDown(screen.getByRole("region", { name: "PDF pages" }), {
+    code: "Space",
+    key: " ",
+  });
+  fireEvent.keyUp(screen.getByRole("region", { name: "PDF pages" }), {
+    code: "Space",
+    key: " ",
+  });
+  fireEvent.pointerUp(overlay(), { pointerId: 9, clientX: 150, clientY: 100 });
+  expect(history.present).toBe(saved);
+  begin();
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(history.present.annotations[0].points[0].x).toBe(100);
+  expect(screen.queryByLabelText("Selection for page 1")).toBeNull();
+});
+
 it("hides categories only in the workspace and prevents locked canvas edits until explicitly unlocked", () => {
   const stroke = {
     id: "protected",

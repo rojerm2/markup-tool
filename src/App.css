@@ -2210,3 +2210,30 @@ summary[aria-disabled="true"] {
   font-size: 12px;
   padding: 5px 8px;
 }
+.selection-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-soft);
+  font-size: 12px;
+}
+.selection-toolbar button,
+.selection-toolbar select {
+  font-size: 12px;
+  padding: 5px 9px;
+}
+.selection-toolbar [role="status"] {
+  color: var(--muted);
+}
+.selection-overlay {
+  z-index: 5;
+}
+.document-list .markup-select {
+  flex-shrink: 0;
+  align-self: center;
+  width: 16px;
+  height: 16px;
+}

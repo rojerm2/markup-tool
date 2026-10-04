@@ -70,19 +70,11 @@ export function selectedObjects(
   });
 }
 
-export function copyMarkups(
-  session: AnnotationSession,
-  ids: string[],
+export function selectionBounds(
+  objects: SelectedObject[],
+  legends: Legend[],
   viewport: PageViewport,
-): MarkupClipboard {
-  const objects = selectedObjects(session, ids);
-  if (new Set(objects.map((o) => o.value.page)).size !== 1)
-    throw new Error("Select markups on one page to copy.");
-  if (
-    new TextEncoder().encode(JSON.stringify(objects)).length >
-    2 * 1024 * 1024
-  )
-    throw new Error("Selection exceeds the 2 MiB clipboard limit.");
+) {
   const bounds = {
     left: Infinity,
     top: Infinity,
@@ -117,7 +109,7 @@ export function copyMarkups(
         include(notePoint(o.value, x, y));
       o.value.pointers.forEach((p) => include(p.target, p.head));
     } else if (o.kind === "legend") {
-      const height = layoutLegend(o.value, session.legends).height;
+      const height = layoutLegend(o.value, legends).height;
       for (const [x, y] of [
         [0, 0],
         [o.value.width, 0],
@@ -130,6 +122,22 @@ export function copyMarkups(
   }
   if (!Object.values(bounds).every(Number.isFinite))
     throw new Error("Invalid selection geometry.");
+  return bounds;
+}
+
+export function copyMarkups(
+  session: AnnotationSession,
+  ids: string[],
+  viewport: PageViewport,
+): MarkupClipboard {
+  const objects = selectedObjects(session, ids);
+  if (new Set(objects.map((o) => o.value.page)).size !== 1)
+    throw new Error("Select markups on one page to copy.");
+  if (
+    new TextEncoder().encode(JSON.stringify(objects)).length >
+    2 * 1024 * 1024
+  )
+    throw new Error("Selection exceeds the 2 MiB clipboard limit.");
   return {
     objects: structuredClone(objects),
     viewport,
@@ -137,7 +145,115 @@ export function copyMarkups(
     categories: Object.fromEntries(
       objects.map((o) => [o.value.id, objectCategory(session, o.value.id)]),
     ),
-    bounds,
+    bounds: selectionBounds(objects, session.legends, viewport),
+  };
+}
+
+export function movementLimits(
+  objects: SelectedObject[],
+  legends: Legend[],
+  viewportFor: (page: number) => PageViewport,
+) {
+  let minX = -Infinity,
+    maxX = Infinity,
+    minY = -Infinity,
+    maxY = Infinity;
+  for (const page of new Set(objects.map((o) => o.value.page))) {
+    const viewport = viewportFor(page),
+      bounds = selectionBounds(
+        objects.filter((o) => o.value.page === page),
+        legends,
+        viewport,
+      );
+    minX = Math.max(minX, Math.min(0, -bounds.left));
+    maxX = Math.min(maxX, Math.max(0, viewport.width - bounds.right));
+    minY = Math.max(minY, Math.min(0, -bounds.top));
+    maxY = Math.min(maxY, Math.max(0, viewport.height - bounds.bottom));
+  }
+  return { minX, maxX, minY, maxY };
+}
+
+export function moveMarkups(
+  session: AnnotationSession,
+  ids: string[],
+  dx: number,
+  dy: number,
+  viewportFor: (page: number) => PageViewport,
+): SessionAction {
+  if (!Number.isFinite(dx) || !Number.isFinite(dy))
+    throw new Error("Invalid movement.");
+  const objects = selectedObjects(session, ids);
+  const { minX, maxX, minY, maxY } = movementLimits(
+    objects,
+    session.legends,
+    viewportFor,
+  );
+  dx = Math.max(minX, Math.min(maxX, dx));
+  dy = Math.max(minY, Math.min(maxY, dy));
+  const actions: SingleSessionAction[] = objects.map((o) => {
+    const v = o.value,
+      viewport = viewportFor(v.page),
+      p = viewportToPdf({ x: 0, y: 0 }, viewport),
+      q = viewportToPdf({ x: dx, y: dy }, viewport);
+    const shift = (point: Point) => ({
+      x: point.x + q.x - p.x,
+      y: point.y + q.y - p.y,
+    });
+    if (o.kind === "highlight")
+      return {
+        type: "move-stroke",
+        before: o.value,
+        legends: session.legends,
+        points: o.value.points.map(shift),
+      };
+    if (o.kind === "shape")
+      return {
+        type: "put-shape",
+        before: o.value,
+        shape: { ...o.value, a: shift(o.value.a), b: shift(o.value.b) },
+      };
+    if (o.kind === "legend")
+      return {
+        type: "put-key",
+        before: o.value,
+        key: { ...o.value, ...shift(o.value) },
+        legends: session.legends,
+      };
+    const n = o.value,
+      note: NoteObject =
+        n.type === "arrow"
+          ? { ...n, a: shift(n.a), b: shift(n.b) }
+          : {
+              ...n,
+              ...shift(n),
+              pointers: n.pointers.map((pointer) => ({
+                ...pointer,
+                target: shift(pointer.target),
+              })),
+            };
+    return { type: "put-note", before: n, note };
+  });
+  return { type: "bulk", before: session, actions, label: "Move selection" };
+}
+
+export function deleteMarkups(
+  session: AnnotationSession,
+  ids: string[],
+): SessionAction {
+  const objects = selectedObjects(session, ids);
+  return {
+    type: "bulk",
+    before: session,
+    label: "Delete selection",
+    actions: objects.map((o) =>
+      o.kind === "highlight"
+        ? { type: "remove-stroke", id: o.value.id }
+        : o.kind === "shape"
+          ? { type: "remove-shape", id: o.value.id }
+          : o.kind === "legend"
+            ? { type: "remove-key", id: o.value.id }
+            : { type: "remove-note", id: o.value.id },
+    ),
   };
 }
 
@@ -348,4 +464,46 @@ export function pasteMarkups(
     next,
   );
   return { action, ids };
+}
+
+export function duplicateMarkups(
+  session: AnnotationSession,
+  ids: string[],
+  viewportFor: (page: number) => PageViewport,
+  createId: () => string = () => crypto.randomUUID(),
+) {
+  const objects = selectedObjects(session, ids);
+  let next = session;
+  const actions: SingleSessionAction[] = [],
+    created: string[] = [];
+  for (const page of new Set(objects.map((o) => o.value.page))) {
+    const viewport = viewportFor(page),
+      clip = copyMarkups(
+        session,
+        objects.filter((o) => o.value.page === page).map((o) => o.value.id),
+        viewport,
+      );
+    const center = viewportToPdf(
+      {
+        x: (clip.bounds.left + clip.bounds.right) / 2 + 12,
+        y: (clip.bounds.top + clip.bounds.bottom) / 2 + 12,
+      },
+      viewport,
+    );
+    const result = pasteMarkups(next, clip, page, viewport, center, createId);
+    if (result.action.type !== "bulk")
+      throw new Error("Invalid duplicate transaction.");
+    actions.push(...result.action.actions);
+    created.push(...result.ids);
+    next = sessionReducer(next, result.action);
+  }
+  return {
+    action: {
+      type: "bulk" as const,
+      before: session,
+      label: "Duplicate markups" as const,
+      actions,
+    },
+    ids: created,
+  };
 }
