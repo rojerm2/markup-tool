@@ -2028,3 +2028,44 @@ summary[aria-disabled="true"] {
     animation: none;
   }
 }
+.recovery-panel {
+  margin: 0.5rem 1rem;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid #d3dae3;
+  border-radius: 10px;
+  background: #fff;
+  max-height: 240px;
+  overflow: auto;
+}
+.recovery-panel summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.recovery-panel p {
+  margin: 0.4rem 0;
+}
+.recovery-panel ul {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.recovery-panel li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0;
+  flex-wrap: wrap;
+}
+.recovery-panel li > span {
+  flex: 1;
+  min-width: 180px;
+}
+.recovery-panel time {
+  display: block;
+  font-size: 0.85rem;
+}
+:root[data-theme="dark"] .recovery-panel {
+  background: #1b2432;
+  border-color: #41516a;
+  color: #e2e8f0;
+}

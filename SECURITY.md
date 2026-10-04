@@ -30,6 +30,13 @@ substantial memory. Temporary embedded/print PDFs live until their owning
 session/window closes.
 
 Projects include the entire source PDF and are **not encrypted**.
+Local recovery checkpoints also contain the source PDF and unsaved annotations,
+are not encrypted, and persist across process crashes. Recovery commands are
+restricted to the editor window and generated identifiers inside the app's
+local data directory. Opening recovery data verifies the PDF identity and
+validates project contents; stored references do not grant filesystem access.
+Completed checkpoints are bounded to eight entries and 512 MiB. Save, Discard
+and Dismiss remove the relevant checkpoint; older checkpoints can be evicted.
 Treat them with the same care as the original document. Export retains the
 original PDF contents; markup is not secure redaction and does not remove
 hidden text, metadata, scripts, or attachments.

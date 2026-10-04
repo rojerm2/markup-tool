@@ -43,3 +43,14 @@ JSON arrays; native source verification streams through a bounded buffer.
 
 The application identifier remains `com.orcific.pdf-markup-tool` across
 releases to retain local preferences and recent-files storage.
+
+Each open document owns a serialized recovery journal. Debounced checkpoints
+store project metadata and a source PDF snapshot in the app's local data
+directory. Native checkpoint writes run outside the UI thread and copy the PDF
+only when creating a new record. Save and Discard queue cleanup behind pending
+writes; failures retain the previous checkpoint and retry. Startup recovery
+verifies the cached PDF identity, validates the project, extracts an owned
+temporary source and opens an unsaved copy rather than overwriting a project.
+Recovery commands accept generated identifiers, require the editor window and
+never authorize stored references. Completed retention is limited to eight
+records and 512 MiB, and interrupted internal temporary files are cleaned up.

@@ -99,3 +99,25 @@ Right-click offers application actions: undo/redo, markup tools, selected-object
 A green check confirms project saves; a blue outgoing arrow confirms exports. Both display the resulting filename, can be dismissed, and respect reduced-motion settings. Highlighter width and color controls show a temporary dot on the visible page at the actual stroke thickness for the current zoom. This preview is not a saved markup and disappears when drawing begins.
 
 The actual user-supplied floor-plan benchmark (96,382,176 bytes, 37 pages) generated an annotated PDF in about **2.45 seconds** on this machine, excluding native transfer and file writing. A desktop export took about **11.7 seconds** from destination confirmation to the final file write while a release build was also running. It preserved all **4,413 original PDF streams** byte-for-byte, page sizes, crop boxes, and rotations. The original file remained unchanged. Run the local benchmark with `PDF_MARKUP_REAL_PDF` set to the PDF path; the private file and generated outputs are excluded from Git.
+
+## Local recovery
+
+The desktop editor keeps local checkpoints of unsaved changes after a short
+pause in editing. The first checkpoint copies and verifies the source PDF;
+later checkpoints update annotation metadata rather than copying the PDF again.
+“Recovery up to date” indicates a completed checkpoint. A storage error appears
+in the editor and checkpoints retry automatically. Changes made immediately
+before a crash, before the checkpoint completes, may not be recoverable.
+
+On launch, **Recover unsaved work** lists available checkpoints. **Recover**
+opens an editable copy, including its saved source PDF, so the original PDF is
+not required. Save the recovered copy as a new `.pmarkup` project. **Dismiss**
+permanently removes that checkpoint. Explicit Save and Discard remove the
+active checkpoint once pending writes have finished. Recovery does not replace
+normal project saving or backups.
+
+Recovery files stay in the application's local data directory. They can contain
+the complete PDF and annotations; they are not uploaded or encrypted by the
+app. At most eight checkpoints and 512 MiB of completed recovery data are kept,
+with older checkpoints removed when the limit is reached. The newest active
+checkpoint is retained first.

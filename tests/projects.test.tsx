@@ -42,8 +42,12 @@ vi.mock("../src/services/projectService", () => ({
 const native = vi.hoisted(() => ({
   close: null as null | ((event: { preventDefault: () => void }) => void),
   destroy: vi.fn(),
+  invoke: vi.fn(),
 }));
-vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true }));
+vi.mock("@tauri-apps/api/core", () => ({
+  isTauri: () => true,
+  invoke: native.invoke,
+}));
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     onCloseRequested: async (handler: typeof native.close) => {
@@ -113,6 +117,11 @@ function deferred<T>() {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  native.invoke.mockImplementation(async (command: string) => {
+    if (command === "list_recovery") return [];
+    if (command === "write_recovery") return "a".repeat(64);
+    return null;
+  });
   vi.mocked(recents.listRecentFiles).mockResolvedValue([]);
   vi.mocked(recents.rememberRecentFile).mockResolvedValue([]);
   vi.mocked(recents.authorizeRecentFile).mockResolvedValue();
@@ -140,6 +149,115 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+it("recovers unsaved work without the original PDF and saves it as a new portable project", async () => {
+  const id = "b".repeat(64);
+  const cache = "C:\\Temp\\recovered-source.pdf";
+  native.invoke.mockImplementation(async (command: string) => {
+    if (command === "list_recovery")
+      return [{ id, filename: source.filename, updatedAt: Date.now() }];
+    if (command === "read_recovery")
+      return {
+        sourcePath: cache,
+        text: JSON.stringify({
+          format: "pdf-markup-project",
+          version: 2,
+          source,
+          session: {
+            ...emptySession,
+            legends: [
+              { id: "wall", name: "Recovered walls", color: "#facc15" },
+            ],
+          },
+        }),
+      };
+    return null;
+  });
+  render(<App />);
+  click(
+    (
+      await screen.findByRole("button", {
+        name: `Recover ${source.filename}`,
+        exact: true,
+      })
+    ).textContent!,
+  );
+  await screen.findByLabelText("PDF page 2");
+  await idle();
+  expect(files.choosePdf).not.toHaveBeenCalled();
+  expect(files.loadSource).toHaveBeenCalledWith(cache, expect.any(AbortSignal));
+  expect(status()).toContain("Unsaved changes");
+  click("Save Project");
+  await idle();
+  expect(files.writeProject).toHaveBeenCalledWith(
+    null,
+    cache,
+    expect.any(String),
+  );
+  const saved = parseProject(vi.mocked(files.writeProject).mock.calls[0][2]);
+  expect(saved.session.legends[0].name).toBe("Recovered walls");
+  expect(saved.source.filename).toBe(source.filename);
+  expect(native.invoke).toHaveBeenCalledWith("delete_recovery", { id });
+  expect(status()).not.toContain("Unsaved changes");
+});
+
+it("dismisses a recovery checkpoint without opening or modifying a document", async () => {
+  const id = "b".repeat(64);
+  native.invoke.mockImplementation(async (command: string) =>
+    command === "list_recovery"
+      ? [{ id, filename: source.filename, updatedAt: Date.now() }]
+      : null,
+  );
+  render(<App />);
+  await screen.findByRole("button", {
+    name: `Dismiss ${source.filename}`,
+    exact: true,
+  });
+  click(`Dismiss ${source.filename}`);
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: `Recover ${source.filename}` }),
+    ).toBeNull(),
+  );
+  expect(native.invoke).toHaveBeenCalledWith("delete_recovery", { id });
+  expect(files.loadSource).not.toHaveBeenCalled();
+});
+
+it("keeps recovery available after a source identity failure", async () => {
+  const id = "b".repeat(64);
+  native.invoke.mockImplementation(async (command: string) => {
+    if (command === "list_recovery")
+      return [{ id, filename: source.filename, updatedAt: Date.now() }];
+    if (command === "read_recovery")
+      return {
+        sourcePath: "C:\\Temp\\wrong.pdf",
+        text: JSON.stringify({
+          format: "pdf-markup-project",
+          version: 2,
+          source: { ...source, sha256: "c".repeat(64) },
+          session: emptySession,
+        }),
+      };
+    return null;
+  });
+  render(<App />);
+  await screen.findByRole("button", {
+    name: `Recover ${source.filename}`,
+    exact: true,
+  });
+  click(`Recover ${source.filename}`);
+  await idle();
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Recovery source identity mismatch",
+  );
+  expect(
+    screen.getByRole("button", { name: `Recover ${source.filename}` }),
+  ).toBeTruthy();
+  expect(screen.queryByLabelText("PDF page 2")).toBeNull();
+  expect(native.invoke).not.toHaveBeenCalledWith(
+    "delete_recovery",
+    expect.anything(),
+  );
 });
 it("opens a bundled project without a PDF picker, preserves its filename and exports from the included PDF", async () => {
   const cached = "C:\\Temp\\pdf-markup-included.pdf";

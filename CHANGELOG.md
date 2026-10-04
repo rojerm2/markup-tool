@@ -2,6 +2,16 @@
 
 Versioned changes follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Debounced local crash checkpoints and startup recovery of unsaved projects,
+  including a verified PDF snapshot without repeated large-file copies.
+- Bounded recovery retention, automatic checkpoint retries, and cleanup after
+  Save, Discard and interrupted writes.
+- Corresponding font source and provenance checks in build/distribution assets.
+
 ## [0.3.0] - 2026-10-04
 
 ### Added

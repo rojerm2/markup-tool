@@ -56,6 +56,15 @@ import {
   type RecentFile,
 } from "./services/recentFiles";
 import RecentFilesMenu from "./components/Toolbar/RecentFilesMenu";
+import RecoveryPanel from "./components/Toolbar/RecoveryPanel";
+import {
+  RecoveryJournal,
+  listRecovery,
+  readRecovery,
+  deleteRecovery,
+  type RecoveryEntry,
+  type RecoveryState,
+} from "./services/recoveryService";
 
 type Work = {
   id: number;
@@ -67,6 +76,7 @@ type Work = {
   session: AnnotationSession;
   saved: string;
   controller: AbortController;
+  recovery: RecoveryJournal;
 };
 type Choice = "save" | "discard" | "cancel";
 
@@ -114,6 +124,9 @@ function AppContent() {
   const [sounds, setSounds] = useState(readSoundsEnabled);
   const [volume, setVolume] = useState(readSoundVolume);
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
+  const [recoveries, setRecoveries] = useState<RecoveryEntry[]>([]);
+  const [recoveryStatus, setRecoveryStatus] = useState<RecoveryState>("idle");
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const appRoot = useRef<HTMLElement>(null);
   const preferences = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
@@ -180,6 +193,36 @@ function AppContent() {
   const dirty = (value: Work | null) =>
     !!value && JSON.stringify(value.session) !== value.saved;
 
+  useEffect(() => {
+    let current = true;
+    void listRecovery()
+      .then((entries) => {
+        if (current) setRecoveries(entries);
+      })
+      .catch((error) => {
+        if (current)
+          setRecoveryError(`Recovery list unavailable: ${String(error)}`);
+      });
+    return () => {
+      current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!work) return;
+    if (dirty(work)) work.recovery.schedule(work);
+    else void work.recovery.clear();
+  }, [work]);
+
+  function journal(workId: number, recoveryId: string | null = null) {
+    return new RecoveryJournal(recoveryId, (state, error) => {
+      if (alive.current && live.current?.id === workId) {
+        setRecoveryStatus(state);
+        setRecoveryError(error ?? null);
+      }
+    });
+  }
+
   function publish(value: Work) {
     live.current = value;
     setWork(value);
@@ -236,6 +279,7 @@ function AppContent() {
     if (!path || !alive.current || live.current?.id !== snapshot.id)
       return false;
     publish({ ...live.current, projectPath: path, saved });
+    if (!dirty(live.current)) await snapshot.recovery.clear();
     await remember(path);
     setFileResult({ id: ++fileResultId.current, kind: "save", path });
     playActionSound("success");
@@ -243,13 +287,20 @@ function AppContent() {
   }
 
   async function guard() {
-    if (!dirty(live.current)) return true;
+    if (!dirty(live.current)) {
+      await live.current?.recovery.clear();
+      return true;
+    }
     setQuestion(true);
     const choice = await new Promise<Choice>((resolve) => {
       pending.current = resolve;
     });
     if (choice === "cancel") return false;
-    return choice === "discard" || (await saveCurrent());
+    if (choice === "discard") {
+      await live.current?.recovery.clear();
+      return true;
+    }
+    return await saveCurrent();
   }
 
   async function run(
@@ -278,6 +329,8 @@ function AppContent() {
       replacing.current = false;
       if (alive.current) {
         setOperation(null);
+        if (kind === "opening" && live.current && dirty(live.current))
+          live.current.recovery.schedule(live.current);
         if (kind !== "exporting" && kind !== "printing") setNotice(null);
       }
     }
@@ -390,8 +443,9 @@ function AppContent() {
         const session =
           selected?.project.session ?? structuredClone(emptySession);
         const previous = live.current;
+        const workId = ++counter.current;
         publish({
-          id: ++counter.current,
+          id: workId,
           sourcePath: path,
           projectPath: selected?.path ?? null,
           ...loaded,
@@ -404,11 +458,60 @@ function AppContent() {
           history: new SessionHistory(session),
           saved: JSON.stringify(session),
           controller,
+          recovery: journal(workId),
         });
+        setRecoveryStatus("idle");
+        setRecoveryError(null);
+        previous?.recovery.dispose();
         staging.current = null;
         playActionSound("success");
         previous?.controller.abort();
         await remember(selected?.path ?? path);
+      } finally {
+        if (staging.current === controller) {
+          controller.abort();
+          staging.current = null;
+        }
+      }
+    });
+  }
+
+  async function recoverWork(entry: RecoveryEntry) {
+    await run("opening", async () => {
+      if (!(await guard()) || !alive.current) return;
+      const restored = await readRecovery(entry.id);
+      const controller = new AbortController();
+      staging.current = controller;
+      try {
+        const loaded = await loadSource(restored.sourcePath, controller.signal);
+        if (!sameSource(restored.project.source, loaded.source))
+          throw new Error("Recovery source identity mismatch");
+        if (!alive.current || controller.signal.aborted) return;
+        const previous = live.current;
+        const workId = ++counter.current;
+        const session = restored.project.session;
+        publish({
+          id: workId,
+          sourcePath: restored.sourcePath,
+          projectPath: null,
+          ...loaded,
+          source: {
+            ...loaded.source,
+            filename: restored.project.source.filename,
+          },
+          history: new SessionHistory(session),
+          session,
+          saved: "",
+          controller,
+          recovery: journal(workId, entry.id),
+        });
+        staging.current = null;
+        setRecoveryStatus("protected");
+        setRecoveryError(null);
+        setRecoveries((entries) => entries.filter((v) => v.id !== entry.id));
+        previous?.recovery.dispose();
+        previous?.controller.abort();
+        playActionSound("success");
       } finally {
         if (staging.current === controller) {
           controller.abort();
@@ -454,6 +557,7 @@ function AppContent() {
       window.removeEventListener("beforeunload", beforeUnload);
       staging.current?.abort();
       live.current?.controller.abort();
+      live.current?.recovery.dispose();
       pending.current?.("cancel");
       pending.current = null;
     };
@@ -635,7 +739,23 @@ function AppContent() {
         {operation &&
           ` · ${operation === "exporting" || operation === "printing" ? exportProgress : operation === "saving" ? "Saving…" : operation === "opening" ? "Opening…" : "Closing…"}`}
         {!operation && notice && ` | ${notice}`}
+        {work && recoveryStatus === "protected" && " · Recovery up to date"}
+        {work && recoveryStatus === "writing" && " · Updating recovery…"}
       </p>
+      <RecoveryPanel
+        entries={recoveries}
+        disabled={!!operation}
+        recover={(entry) => void recoverWork(entry)}
+        dismiss={(entry) =>
+          void run("saving", async () => {
+            await deleteRecovery(entry.id);
+            if (alive.current)
+              setRecoveries((entries) =>
+                entries.filter((v) => v.id !== entry.id),
+              );
+          })
+        }
+      />
       {work && (
         <div className="document-location" aria-label="Current file">
           <strong>
@@ -649,6 +769,11 @@ function AppContent() {
       {error && (
         <p role="alert" className="project-error">
           {error}
+        </p>
+      )}
+      {recoveryError && (
+        <p role="alert" className="project-error">
+          {recoveryError}
         </p>
       )}
       {operation && notice && (
