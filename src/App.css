@@ -2389,3 +2389,147 @@ summary[aria-disabled="true"] {
   gap: 1rem;
   padding: 0.4rem 1rem;
 }
+.revision-comparison[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin: auto;
+  width: min(1240px, 96vw);
+  max-width: 96vw;
+  height: 90vh;
+  max-height: 90vh;
+  padding: 16px;
+  overflow: auto;
+}
+.comparison-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.comparison-heading h2 {
+  margin: 0;
+}
+.comparison-files {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.comparison-files section {
+  display: grid;
+  align-content: start;
+  gap: 0.4rem;
+  min-width: 0;
+  padding: 0.5rem;
+  background: var(--surface-soft);
+  border-radius: 8px;
+}
+.comparison-files h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.comparison-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.comparison-page-choice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.comparison-page-choice label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.comparison-page-choice input {
+  width: 4.5rem;
+}
+.comparison-page-choice button {
+  min-width: 2.4rem;
+}
+.comparison-controls {
+  display: flex;
+  gap: 0.75rem;
+  align-items: end;
+  flex-wrap: wrap;
+}
+.comparison-controls label {
+  display: grid;
+  gap: 0.25rem;
+}
+.comparison-alignment {
+  display: flex;
+  align-items: end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding-top: 0.5rem;
+}
+.comparison-alignment input {
+  width: 6rem;
+}
+.comparison-note {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0;
+}
+.comparison-pan {
+  flex: 1;
+  min-height: 200px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  overflow: hidden;
+}
+.comparison-side {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.comparison-viewport {
+  min-width: 0;
+  overflow: auto;
+  padding: 8px;
+  background: var(--canvas);
+  cursor: grab;
+  touch-action: none;
+}
+.comparison-viewport:active {
+  cursor: grabbing;
+}
+.comparison-board {
+  position: relative;
+  background: white;
+  overflow: hidden;
+  box-shadow: 0 1px 4px #0004;
+  isolation: isolate;
+}
+.comparison-sheet {
+  pointer-events: none;
+}
+.comparison-sheet canvas {
+  display: block;
+}
+.comparison-render-status,
+.comparison-render-error {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 0.4rem;
+  max-width: 24rem;
+  background: var(--surface);
+  color: var(--text);
+}
+@media (max-width: 640px) {
+  .comparison-files {
+    gap: 0.5rem;
+  }
+  .comparison-page-choice {
+    font-size: 0.8rem;
+  }
+  .comparison-heading h2 {
+    font-size: 1rem;
+  }
+}

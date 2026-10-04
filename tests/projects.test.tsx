@@ -1307,6 +1307,31 @@ it("does not save or print the background project from preset dialog shortcuts",
   click("Close");
   expect(screen.queryByRole("dialog")).toBeNull();
 });
+it("comparison isolates background shortcuts even when focus leaves the dialog and preserves the project", async () => {
+  render(<App />);
+  await openPdf();
+  click("Thick");
+  click("Compare PDFs…");
+  expect(
+    screen.getByRole("dialog", { name: "Compare PDF revisions" }),
+  ).toBeTruthy();
+  fireEvent.keyDown(document.body, { key: "s", ctrlKey: true });
+  fireEvent.keyDown(document.body, { key: "p", ctrlKey: true });
+  fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
+  expect(files.writeProject).not.toHaveBeenCalled();
+  expect(exports.printPdf).not.toHaveBeenCalled();
+  click("Close comparison");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Compare PDFs…" }),
+  );
+  click("Save Project");
+  await idle();
+  expect(
+    parseProject(vi.mocked(files.writeProject).mock.calls.at(-1)![2]).session
+      .drawing.width,
+  ).toBe(20);
+});
 
 it("undo creation clears a stale legend rename target and allows a new category", async () => {
   render(<App />);

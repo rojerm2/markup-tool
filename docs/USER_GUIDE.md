@@ -245,6 +245,35 @@ selection; review them before sharing. No network connection is needed.
 Invalid imports and storage failures appear in the dialog. A corrupt local
 library is left intact rather than automatically replaced.
 
+## Comparing drawing revisions
+
+Choose **Compare PDFs…** to compare two local PDFs. The open project's original
+PDF becomes the baseline, or choose a baseline when no project is open. Choose
+a revision PDF and pair the matching pages using the independent page controls.
+If the revision lacks the baseline's page number, choose its matching sheet
+explicitly; the app does not substitute another page automatically.
+
+**Side by side** synchronizes both views. Drag either sheet, use its scrollbars,
+or focus it and use the arrow keys (Shift moves farther). **Color overlay** shows
+baseline ink in blue, revision ink in red, and overlapping ink darker. White
+backgrounds become transparent. This mode compares rendered ink rather than
+the semantic contents of the drawings.
+
+Open **Align revision** to adjust horizontal/vertical offsets, scale or rotation.
+Offsets are percentages of the baseline's sheet dimensions and remain stable
+when zoom changes. Both sheets retain their PDF viewport dimensions, including
+crop, rotation and user units. Reset alignment or choose another page pair to
+start again. Zoom ranges from 25% to 3200% of the fitted view; a bounded detail
+tile follows the visible area at high zoom. **Fit sheets** fits the full aligned
+drawing area and resets scrolling on both sides. Changing alignment keeps the
+current zoom scale stable; fit again to include the moved or rotated sheet.
+
+Comparison runs locally without modifying either PDF or the project. It shows
+original PDF pages, without the project's added markups, and comparison settings
+are temporary. Rendering quality and alignment affect what can be seen; visual
+comparison does not guarantee detection of every change. Verify significant
+findings against the source drawings. Close comparison to resume editing.
+
 ## Local recovery
 
 The desktop editor keeps local checkpoints of unsaved changes after a short

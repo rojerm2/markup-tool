@@ -54,6 +54,7 @@ import {
 import ExportOptions, {
   type ExportAction,
 } from "./components/Toolbar/ExportOptions";
+import RevisionComparison from "./components/PdfViewer/RevisionComparison";
 import { SessionHistory } from "./services/sessionHistory";
 import type { PDFPageProxy } from "pdfjs-dist";
 import {
@@ -207,6 +208,8 @@ function AppContent() {
     [notice, setNotice] = useState<string | null>(null);
   const [exportProgress, setExportProgress] = useState("Exporting…");
   const [exportOptions, setExportOptions] = useState(false);
+  const [comparisonOpen, setComparisonOpen] = useState(false);
+  const comparisonButton = useRef<HTMLButtonElement>(null);
   const operationController = useRef<AbortController | null>(null);
   const [operationStarted, setOperationStarted] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -510,6 +513,7 @@ function AppContent() {
   }
   const shortcuts = useRef<(e: KeyboardEvent) => void>(() => {});
   shortcuts.current = (e) => {
+    if (document.querySelector("dialog[open]")) return;
     if (
       e.target instanceof Element &&
       e.target.closest('dialog, [role="dialog"], [role="alertdialog"]')
@@ -821,6 +825,17 @@ function AppContent() {
           >
             Export options…
           </button>
+          <button
+            ref={comparisonButton}
+            disabled={!!operation}
+            onClick={() => {
+              live.current?.history.cancelSnapshotDrafts();
+              live.current?.history.invalidate();
+              setComparisonOpen(true);
+            }}
+          >
+            Compare PDFs…
+          </button>
         </div>
         <details ref={preferences} className="ui-preferences">
           <summary>Preferences</summary>
@@ -942,6 +957,24 @@ function AppContent() {
           }}
         />
       )}
+      {comparisonOpen && (
+        <RevisionComparison
+          baseline={
+            work
+              ? {
+                  source: work.source,
+                  pages: work.pages,
+                  path: work.projectPath ?? work.sourcePath,
+                }
+              : undefined
+          }
+          initialPage={work?.navigation.view.page ?? 1}
+          onClose={() => {
+            setComparisonOpen(false);
+            comparisonButton.current?.focus();
+          }}
+        />
+      )}
       <RecoveryPanel
         entries={recoveries}
         disabled={!!operation}
@@ -999,7 +1032,12 @@ function AppContent() {
             onAction={(action, generation) =>
               mutate(action, generation, work.id)
             }
-            disabled={operation === "opening" || operation === "closing"}
+            disabled={
+              operation === "opening" ||
+              operation === "closing" ||
+              comparisonOpen ||
+              exportOptions
+            }
           />
         ) : (
           <section className="empty-document">

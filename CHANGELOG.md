@@ -6,6 +6,9 @@ Versioned changes follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Read-only PDF revision comparison with synchronized side-by-side views,
+  blue/red color overlays, explicit page pairing and manual sheet alignment.
+  Bounded overview and visible-detail rendering support large sheets and zoom.
 - Optional page/category export and selected-page printing, cancellable worker
   processing, elapsed time and explicit processing/save stages.
 - CSV and paginated PDF markup reports with source/export page mapping,

@@ -93,6 +93,21 @@ filesystem permissions.
 The application identifier remains `com.orcific.pdf-markup-tool` across
 releases to retain local preferences and recent-files storage.
 
+Revision comparison borrows the open project's source pages without taking
+ownership, or loads dialog-authorized PDFs through the existing bounded native
+reader. Independently owned PDF.js documents are aborted on replacement/close;
+cancelled or failed loads retain prior documents. Page pairing never silently
+clamps missing pages. Viewport-space alignment handles crop, PDF rotation and
+user units with offsets independent of display zoom; union bounds retain moved
+or rotated sheets. Separate scroll surfaces synchronize both sides.
+
+Comparison overview and visible-detail canvases are each limited to four million
+pixels and 4096 pixels per edge. Inverse sheet transforms locate visible detail
+on rotated/scaled revisions. Replaced renders are cancelled and stale results
+cannot publish. Overlay tint affects rendered pixels only, and the overview is
+masked beneath its detail tile to avoid doubling ink. Comparison settings remain
+temporary; no document bytes, paths or new permissions are persisted by it.
+
 Each open document owns a serialized recovery journal. Debounced checkpoints
 store project metadata and a source PDF snapshot in the app's local data
 directory. Native checkpoint writes run outside the UI thread and copy the PDF
