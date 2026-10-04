@@ -99,6 +99,91 @@ async function openPdf() {
   await idle();
 }
 
+it("saves bookmarks in portable projects while view changes stay clean and out of annotation Undo", async () => {
+  render(<App />);
+  await openPdf();
+  click("Next page");
+  click("Save Project");
+  await idle();
+  let project = parseProject(
+    vi.mocked(files.writeProject).mock.calls.at(-1)![2],
+  );
+  expect(project.navigation?.view.page).toBe(2);
+  expect(project.navigation?.bookmarks).toEqual([]);
+  expect(status()).toContain("Saved");
+  click("Previous page");
+  expect(status()).toContain("Saved");
+  click("Pages & markups");
+  fireEvent.click(screen.getByRole("tab", { name: "Bookmarks" }));
+  fireEvent.change(screen.getByLabelText("Bookmark label"), {
+    target: { value: "Ground floor" },
+  });
+  click("Bookmark this page");
+  expect(status()).toContain("Unsaved changes");
+  expect(
+    screen
+      .getByRole("button", { name: "Undo", exact: true })
+      .hasAttribute("disabled"),
+  ).toBe(true);
+  click("Save Project");
+  await idle();
+  project = parseProject(vi.mocked(files.writeProject).mock.calls.at(-1)![2]);
+  expect(project.navigation?.bookmarks).toEqual([
+    { page: 1, label: "Ground floor" },
+  ]);
+  const cached = JSON.parse(localStorage.getItem("pdf-markup.navigation")!);
+  expect(
+    cached.every(
+      (entry: { navigation: { bookmarks: unknown[] } }) =>
+        entry.navigation.bookmarks.length === 0,
+    ),
+  ).toBe(true);
+  cleanup();
+  vi.mocked(files.readProject).mockResolvedValue({
+    path: "C:\\plans\\one.pmarkup",
+    project,
+  });
+  vi.mocked(files.resolveSource).mockResolvedValue("C:\\Temp\\embedded.pdf");
+  render(<App />);
+  click("Open Project");
+  await screen.findByLabelText("PDF page 2");
+  await idle();
+  click("Pages & markups");
+  fireEvent.click(screen.getByRole("tab", { name: "Bookmarks" }));
+  expect(
+    screen.getByRole("button", { name: "Ground floor Page 1" }),
+  ).toBeTruthy();
+  expect(status()).toContain("Saved");
+});
+
+it("keeps bookmark edits made during a slow save dirty", async () => {
+  render(<App />);
+  await openPdf();
+  click("Pages & markups");
+  fireEvent.click(screen.getByRole("tab", { name: "Bookmarks" }));
+  const saving = deferred<string | null>();
+  vi.mocked(files.writeProject).mockReturnValueOnce(saving.promise);
+  click("Save Project");
+  fireEvent.change(screen.getByLabelText("Bookmark label"), {
+    target: { value: "Edited during save" },
+  });
+  click("Bookmark this page");
+  saving.resolve("C:\\plans\\one.pmarkup");
+  await idle();
+  expect(status()).toContain("Unsaved changes");
+  expect(
+    parseProject(vi.mocked(files.writeProject).mock.calls[0][2]).navigation
+      ?.bookmarks,
+  ).toEqual([]);
+  click("Save Project");
+  await idle();
+  expect(
+    parseProject(vi.mocked(files.writeProject).mock.calls[1][2]).navigation
+      ?.bookmarks[0].label,
+  ).toBe("Edited during save");
+  expect(status()).toContain("Saved");
+});
+
 function create(name = "Walls") {
   if (!screen.queryByLabelText("Legend name")) click("Legends (0)");
   fireEvent.change(screen.getByLabelText("Legend name"), {
@@ -116,6 +201,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 beforeEach(() => {
+  localStorage.removeItem("pdf-markup.navigation");
   vi.resetAllMocks();
   native.invoke.mockImplementation(async (command: string) => {
     if (command === "list_recovery") return [];

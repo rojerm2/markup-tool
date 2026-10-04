@@ -62,6 +62,10 @@ export class RecoveryJournal {
     this.timer = setTimeout(() => void this.flush(), RECOVERY_DELAY);
   }
 
+  amendNavigation(navigation: DocumentNavigation) {
+    if (this.pending) this.pending = { ...this.pending, navigation };
+  }
+
   flush(): Promise<void> {
     clearTimeout(this.timer);
     const snapshot = this.pending;

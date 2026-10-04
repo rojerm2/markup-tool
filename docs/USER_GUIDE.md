@@ -22,6 +22,29 @@ In **Select/Edit**, a hand pointer marks clickable highlights, shapes, notes, ar
 
 Undo/redo briefly outlines affected areas and shows the action/page in a status message. Offscreen changes are brought into view; deleted objects are outlined where they used to be. Reduced-motion settings use a static outline instead of pulsing.
 
+## Document navigation
+
+Choose **Pages & markups** to open the document sidebar. **Pages** shows page
+thumbnails; clicking one jumps to that page. Preview rendering is limited to
+nearby thumbnails, even in a document with thousands of pages. Pages with very
+complex annotations show a source preview and an annotation count.
+
+**Bookmarks** lets you name the current page and jump back to it later. Bookmarks
+are saved inside the project, including recovery checkpoints. Adding, changing
+or removing a bookmark creates unsaved project changes. Annotation Undo/Redo
+continues to affect annotations; use the bookmark controls to change bookmarks.
+
+**Markups** lists highlights, shapes, text, arrows and page legends. Search by
+label, page, type or category, and combine the type/category/current-page filters.
+Click a result to bring it into view and select it for editing. Keyboard focus
+returns to the page so arrow keys move the selected object and Space pans.
+
+The last page, zoom and view position are restored locally when reopening the
+same document or project. Manual saves include the view for another computer.
+View changes do not create unsaved edits or annotation Undo steps. Local view
+preferences retain up to 12 document identities; they contain no PDF contents
+or annotation data.
+
 ## Existing projects
 
 Older projects stored a reference to the original PDF. Open one and locate that PDF if prompted, then save it to upgrade it. New portable projects require this version of the app; older app versions cannot open them. Project files now include the PDF's contents, so they are larger than the old annotation-only files.

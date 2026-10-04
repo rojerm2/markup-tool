@@ -58,6 +58,14 @@ import {
 import RecentFilesMenu from "./components/Toolbar/RecentFilesMenu";
 import RecoveryPanel from "./components/Toolbar/RecoveryPanel";
 import {
+  defaultNavigation,
+  navigationKey,
+  parseNavigation,
+  readNavigation,
+  writeNavigation,
+  type DocumentNavigation,
+} from "./services/documentNavigation";
+import {
   RecoveryJournal,
   listRecovery,
   readRecovery,
@@ -75,6 +83,8 @@ type Work = {
   history: SessionHistory;
   session: AnnotationSession;
   saved: string;
+  navigation: DocumentNavigation;
+  savedBookmarks: string;
   controller: AbortController;
   recovery: RecoveryJournal;
 };
@@ -190,8 +200,21 @@ function AppContent() {
   const [exportProgress, setExportProgress] = useState("Exporting…");
   const [question, setQuestion] = useState(false);
   const pending = useRef<((choice: Choice) => void) | null>(null);
+  const sessionKeys = useRef<{
+    session: AnnotationSession;
+    key: string;
+  } | null>(null);
+
+  function sessionKey(session: AnnotationSession) {
+    if (sessionKeys.current?.session !== session) {
+      sessionKeys.current = { session, key: JSON.stringify(session) };
+    }
+    return sessionKeys.current.key;
+  }
   const dirty = (value: Work | null) =>
-    !!value && JSON.stringify(value.session) !== value.saved;
+    !!value &&
+    (sessionKey(value.session) !== value.saved ||
+      JSON.stringify(value.navigation.bookmarks) !== value.savedBookmarks);
 
   useEffect(() => {
     let current = true;
@@ -212,7 +235,14 @@ function AppContent() {
     if (!work) return;
     if (dirty(work)) work.recovery.schedule(work);
     else void work.recovery.clear();
-  }, [work]);
+  }, [
+    work?.id,
+    work?.session,
+    work?.navigation.bookmarks,
+    work?.saved,
+    work?.savedBookmarks,
+    work?.projectPath,
+  ]);
 
   function journal(workId: number, recoveryId: string | null = null) {
     return new RecoveryJournal(recoveryId, (state, error) => {
@@ -226,6 +256,26 @@ function AppContent() {
   function publish(value: Work) {
     live.current = value;
     setWork(value);
+  }
+
+  function updateNavigation(value: DocumentNavigation, workId: number) {
+    const current = live.current;
+    if (!current || current.id !== workId || !alive.current) return;
+    const navigation = parseNavigation(value, current.pages.length);
+    const sameBookmarks =
+      JSON.stringify(navigation.bookmarks) ===
+      JSON.stringify(current.navigation.bookmarks);
+    if (replacing.current && !sameBookmarks) return;
+    if (sameBookmarks) navigation.bookmarks = current.navigation.bookmarks;
+    if (JSON.stringify(navigation) === JSON.stringify(current.navigation))
+      return;
+    current.recovery.amendNavigation(navigation);
+    writeNavigation(
+      navigationKey(current.source.sha256, current.projectPath),
+      { bookmarks: [], view: navigation.view },
+      current.pages.length,
+    );
+    publish({ ...current, navigation });
   }
 
   async function remember(path: string) {
@@ -266,11 +316,16 @@ function AppContent() {
   }
 
   async function saveCurrent(as = false): Promise<boolean> {
+    live.current?.history.cancelSnapshotDrafts();
     const snapshot = live.current;
     if (!snapshot) return false;
-    snapshot.history.cancelSnapshotDrafts();
-    const serialized = serializeProject(snapshot.source, snapshot.session);
-    const saved = JSON.stringify(snapshot.session);
+    const serialized = serializeProject(
+      snapshot.source,
+      snapshot.session,
+      snapshot.navigation,
+    );
+    const saved = sessionKey(snapshot.session);
+    const savedBookmarks = JSON.stringify(snapshot.navigation.bookmarks);
     const path = await writeProject(
       as ? null : snapshot.projectPath,
       snapshot.sourcePath,
@@ -278,7 +333,12 @@ function AppContent() {
     );
     if (!path || !alive.current || live.current?.id !== snapshot.id)
       return false;
-    publish({ ...live.current, projectPath: path, saved });
+    publish({ ...live.current, projectPath: path, saved, savedBookmarks });
+    writeNavigation(
+      navigationKey(snapshot.source.sha256, path),
+      { bookmarks: [], view: live.current!.navigation.view },
+      snapshot.pages.length,
+    );
     if (!dirty(live.current)) await snapshot.recovery.clear();
     await remember(path);
     setFileResult({ id: ++fileResultId.current, kind: "save", path });
@@ -287,6 +347,7 @@ function AppContent() {
   }
 
   async function guard() {
+    live.current?.history.cancelSnapshotDrafts();
     if (!dirty(live.current)) {
       await live.current?.recovery.clear();
       return true;
@@ -442,6 +503,15 @@ function AppContent() {
         if (!alive.current || controller.signal.aborted) return;
         const session =
           selected?.project.session ?? structuredClone(emptySession);
+        const navigation = selected?.project.navigation ?? defaultNavigation();
+        const lastView = readNavigation(
+          navigationKey(loaded.source.sha256, selected?.path ?? null),
+          loaded.pages.length,
+        );
+        const restoredNavigation = {
+          ...navigation,
+          view: lastView?.view ?? navigation.view,
+        };
         const previous = live.current;
         const workId = ++counter.current;
         publish({
@@ -456,7 +526,9 @@ function AppContent() {
           },
           session,
           history: new SessionHistory(session),
-          saved: JSON.stringify(session),
+          saved: sessionKey(session),
+          navigation: restoredNavigation,
+          savedBookmarks: JSON.stringify(restoredNavigation.bookmarks),
           controller,
           recovery: journal(workId),
         });
@@ -502,6 +574,8 @@ function AppContent() {
           history: new SessionHistory(session),
           session,
           saved: "",
+          navigation: restored.project.navigation ?? defaultNavigation(),
+          savedBookmarks: "",
           controller,
           recovery: journal(workId, entry.id),
         });
@@ -792,6 +866,8 @@ function AppContent() {
             key={work.id}
             pages={work.pages}
             session={work.session}
+            navigation={work.navigation}
+            onNavigation={(navigation) => updateNavigation(navigation, work.id)}
             history={work.history}
             onHistory={traverse}
             onAction={(action, generation) =>

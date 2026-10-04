@@ -11,6 +11,82 @@ import PdfNavigationView from "../src/components/PdfViewer/PdfNavigationView";
 import { SessionHistory } from "../src/services/sessionHistory";
 import { emptySession } from "../src/services/annotationSession";
 
+it("restores page/zoom/center and flushes the latest view before a save snapshot", () => {
+  const history = new SessionHistory(emptySession),
+    onNavigation = vi.fn();
+  const navigation = {
+    bookmarks: [{ page: 2, label: "Ground floor" }],
+    view: {
+      page: 2,
+      mode: "manual" as const,
+      zoom: 2,
+      center: { x: 300, y: 400 },
+    },
+  };
+  render(
+    <PdfNavigationView
+      pages={[page(1), page(2)]}
+      history={history}
+      navigation={navigation}
+      onNavigation={onNavigation}
+    />,
+  );
+  expect((screen.getByLabelText("Page number") as HTMLInputElement).value).toBe(
+    "2",
+  );
+  expect(
+    (screen.getByLabelText("PDF page 2") as HTMLCanvasElement).style.height,
+  ).toBe("1600px");
+  act(() => history.cancelSnapshotDrafts());
+  expect(onNavigation).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      bookmarks: navigation.bookmarks,
+      view: expect.objectContaining({
+        page: 2,
+        zoom: 2,
+        center: navigation.view.center,
+      }),
+    }),
+  );
+  expect(history.undoLabel).toBeUndefined();
+});
+
+it("reveals an off-page markup, transfers focus and nudges the selected highlight with arrows", () => {
+  const stroke = {
+    id: "off-page",
+    type: "freehand" as const,
+    page: 2,
+    legendId: null,
+    color: "#facc15",
+    opacity: 0.4,
+    width: 10,
+    points: [
+      { x: 100, y: 200 },
+      { x: 200, y: 200 },
+    ],
+  };
+  const history = new SessionHistory({
+    ...emptySession,
+    annotations: [stroke],
+  });
+  render(<PdfNavigationView pages={[page(1), page(2)]} history={history} />);
+  fireEvent.click(screen.getByRole("button", { name: "Pages & markups" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Markups" }));
+  fireEvent.click(document.querySelector(".markup-jump")!);
+  const host = screen.getByRole("region", { name: "PDF pages" });
+  expect(document.activeElement).toBe(host);
+  expect((screen.getByLabelText("Page number") as HTMLInputElement).value).toBe(
+    "2",
+  );
+  expect(history.undoLabel).toBeUndefined();
+  fireEvent.keyDown(host, { key: "ArrowRight" });
+  expect(history.present.annotations[0].points[0].x).toBe(102);
+  expect(history.undoLabel).toBe("Move stroke");
+  fireEvent.keyDown(host, { code: "Space" });
+  expect(host.className).toContain("can-pan");
+  fireEvent.keyUp(host, { code: "Space" });
+});
+
 let width = 800,
   height = 600;
 let resize: () => void;

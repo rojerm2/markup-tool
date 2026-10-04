@@ -27,6 +27,26 @@ const snapshot = {
 };
 const journals: RecoveryJournal[] = [];
 
+it("captures the latest view without postponing an annotation checkpoint during scrolling", async () => {
+  const { value } = journal();
+  value.schedule(snapshot);
+  const navigation = {
+    bookmarks: [{ page: 2, label: "Ground floor" }],
+    view: {
+      page: 2,
+      mode: "manual" as const,
+      zoom: 4,
+      center: { x: 200, y: 300 },
+    },
+  };
+  await vi.advanceTimersByTimeAsync(1000);
+  value.amendNavigation(navigation);
+  await vi.advanceTimersByTimeAsync(RECOVERY_DELAY - 1000);
+  expect(invoke).toHaveBeenCalledOnce();
+  const args = vi.mocked(invoke).mock.calls[0][1] as { text: string };
+  expect(parseProject(args.text).navigation).toEqual(navigation);
+});
+
 function journal(id: string | null = null) {
   const state = vi.fn();
   const value = new RecoveryJournal(id, state);

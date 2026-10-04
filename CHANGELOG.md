@@ -11,6 +11,10 @@ Versioned changes follow [Semantic Versioning](https://semver.org/).
 - Bounded recovery retention, automatic checkpoint retries, and cleanup after
   Save, Discard and interrupted writes.
 - Corresponding font source and provenance checks in build/distribution assets.
+- Collapsible Pages, Bookmarks and searchable Markups navigation, with bounded
+  thumbnail previews and direct selection of off-page annotations.
+- Project bookmarks and restored page, zoom and PDF-space view position without
+  adding navigation steps to annotation undo history.
 
 ## [0.3.0] - 2026-10-04
 

@@ -55,6 +55,12 @@ import HistoryChangeOverlay, {
 } from "../Annotations/HistoryChangeOverlay";
 import { playActionSound } from "../../services/actionSounds";
 import { isSpaceKey } from "../../services/canvasFocus";
+import DocumentPanel from "./DocumentPanel";
+import {
+  defaultNavigation,
+  type DocumentNavigation,
+} from "../../services/documentNavigation";
+import type { MarkupRow } from "../../services/markupList";
 
 const GUTTER = 32;
 const LABEL_HEIGHT = 28;
@@ -68,6 +74,8 @@ export default function PdfNavigationView({
   disabled = false,
   largerControls = false,
   fileActions = [],
+  navigation,
+  onNavigation,
 }: {
   fileActions?: MenuItem[];
   pages: PDFPageProxy[];
@@ -77,7 +85,17 @@ export default function PdfNavigationView({
   onHistory?: (direction: "undo" | "redo") => boolean;
   disabled?: boolean;
   largerControls?: boolean;
+  navigation?: DocumentNavigation;
+  onNavigation?: (navigation: DocumentNavigation) => void;
 }) {
+  const [localNavigation, setLocalNavigation] = useState(
+    navigation ?? defaultNavigation,
+  );
+  const documentNavigation = navigation ?? localNavigation;
+  const navigationCallback = useRef(onNavigation);
+  navigationCallback.current = onNavigation;
+  const [documentOpen, setDocumentOpen] = useState(false);
+  const documentButton = useRef<HTMLButtonElement>(null);
   const [local] = useState(
     () => new SessionHistory(controlled ?? emptySession),
   );
@@ -403,7 +421,7 @@ export default function PdfNavigationView({
   }, [disabled, tool, selectedId, dispatch]);
   const host = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
-  const [current, setCurrent] = useState(1);
+  const [current, setCurrent] = useState(documentNavigation.view.page);
   useEffect(() => {
     if (
       selectedId &&
@@ -411,9 +429,20 @@ export default function PdfNavigationView({
     )
       setSelectedId(null);
   }, [current]);
-  const [pageInput, setPageInput] = useState("1");
-  const [mode, setMode] = useState<ZoomMode>("page");
-  const [zoom, setZoom] = useState(1);
+  const [pageInput, setPageInput] = useState(
+    String(documentNavigation.view.page),
+  );
+  const [mode, setMode] = useState<ZoomMode>(documentNavigation.view.mode);
+  const [zoom, setZoom] = useState(documentNavigation.view.zoom);
+  const initialView = useRef<DocumentNavigation["view"] | null>(
+    documentNavigation.view,
+  );
+  const navigationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  const flushNavigation = useRef<() => void>(() => {});
+  const latestBookmarks = useRef(documentNavigation.bookmarks);
+  latestBookmarks.current = documentNavigation.bookmarks;
   useEffect(() => {
     setViewRevision((v) => v + 1);
   }, [size]);
@@ -480,7 +509,7 @@ export default function PdfNavigationView({
       if (
         e?.type === "scroll" &&
         e.target instanceof Element &&
-        e.target.closest(".workspace-panel")
+        e.target.closest(".workspace-panel, .document-panel")
       )
         return;
       setPlacing(false);
@@ -558,7 +587,7 @@ export default function PdfNavigationView({
       if (
         e?.type === "scroll" &&
         e.target instanceof Element &&
-        e.target.closest(".note-properties, .workspace-panel")
+        e.target.closest(".note-properties, .workspace-panel, .document-panel")
       )
         return;
       setPointerPlacement(null);
@@ -647,15 +676,16 @@ export default function PdfNavigationView({
     });
     setCurrent(best);
     setPageInput(String(best));
+    queueNavigation(best);
   }
 
-  function navigate(number: number) {
-    setViewRevision((v) => v + 1);
-    setSelectedId(null);
+  function navigate(number: number, clearSelection = true) {
     if (!Number.isInteger(number) || number < 1 || number > pages.length) {
       setPageInput(String(current));
       return;
     }
+    setViewRevision((v) => v + 1);
+    if (clearSelection) setSelectedId(null);
     const element = host.current;
     const target = element?.querySelector<HTMLElement>(
       `[data-page="${number}"]`,
@@ -669,6 +699,88 @@ export default function PdfNavigationView({
     }
     setCurrent(number);
     setPageInput(String(number));
+    queueNavigation(number);
+  }
+
+  function captureView(page = current): DocumentNavigation["view"] {
+    const element = host.current,
+      canvas = pageCanvas(page);
+    let center: Point | undefined;
+    if (element?.clientHeight && element.clientWidth && canvas) {
+      const rect = element.getBoundingClientRect();
+      center = clientToPdf(
+        {
+          x: rect.left + element.clientWidth / 2,
+          y: rect.top + element.clientHeight / 2,
+        },
+        canvas.getBoundingClientRect(),
+        pages[page - 1].getViewport({ scale: scales[page - 1] }),
+      );
+      if (![center.x, center.y].every(Number.isFinite)) center = undefined;
+    }
+    return { page, mode, zoom, ...(center ? { center } : {}) };
+  }
+
+  function reportNavigation(
+    view: DocumentNavigation["view"],
+    bookmarks = latestBookmarks.current,
+  ) {
+    const value = { bookmarks, view };
+    if (navigationCallback.current) navigationCallback.current(value);
+    else setLocalNavigation(value);
+  }
+
+  function queueNavigation(page = current) {
+    if (!navigationCallback.current) return;
+    clearTimeout(navigationTimer.current);
+    const view = captureView(page);
+    flushNavigation.current = () => {
+      clearTimeout(navigationTimer.current);
+      reportNavigation(view);
+    };
+    navigationTimer.current = setTimeout(() => flushNavigation.current(), 300);
+  }
+  useEffect(() => {
+    const unsubscribe = history.subscribeSnapshotCancellation(() =>
+      flushNavigation.current(),
+    );
+    return () => {
+      unsubscribe();
+      clearTimeout(navigationTimer.current);
+    };
+  }, [history]);
+
+  function centerAt(page: number, point: Point) {
+    const element = host.current,
+      canvas = pageCanvas(page);
+    if (!element || !canvas) return;
+    const position = pdfToClient(
+      point,
+      canvas.getBoundingClientRect(),
+      pages[page - 1].getViewport({ scale: scales[page - 1] }),
+    );
+    const rect = element.getBoundingClientRect();
+    element.scrollLeft += position.x - rect.left - element.clientWidth / 2;
+    element.scrollTop += position.y - rect.top - element.clientHeight / 2;
+    updateRasterPages();
+  }
+
+  function revealMarkup(row: MarkupRow) {
+    history.invalidate();
+    navigate(row.page);
+    centerAt(row.page, row.center);
+    setPlacing(false);
+    setPointerPlacement(null);
+    setSelectedPointer(null);
+    setSelectedNote(
+      row.type === "text" || row.type === "arrow" ? row.id : null,
+    );
+    setSelectedShape(row.type === "shape" ? row.id : null);
+    setSelectedKey(row.type === "legend" ? row.id : null);
+    setSelectedId(row.type === "highlight" ? row.id : null);
+    setTool("edit");
+    queueNavigation(row.page);
+    host.current?.focus({ preventScroll: true });
   }
 
   function submitPage() {
@@ -768,6 +880,21 @@ export default function PdfNavigationView({
   useLayoutEffect(() => {
     const saved = anchor.current;
     const element = host.current;
+    if (initialView.current) {
+      if (
+        element?.clientWidth &&
+        element.clientHeight &&
+        (size.width !== element.clientWidth ||
+          size.height !== element.clientHeight)
+      )
+        return;
+      const restored = initialView.current;
+      initialView.current = null;
+      navigate(restored.page, false);
+      if (restored.center) centerAt(restored.page, restored.center);
+      queueNavigation(restored.page);
+      return;
+    }
     if (saved && element) {
       const canvas = pageCanvas(saved.page);
       if (canvas) {
@@ -787,11 +914,12 @@ export default function PdfNavigationView({
       anchor.current = null;
       pendingPage.current = null;
     } else if (pendingPage.current !== null) {
-      navigate(pendingPage.current);
+      navigate(pendingPage.current, false);
       pendingPage.current = null;
     } else if (mode !== "manual") {
-      navigate(current);
+      navigate(current, false);
     }
+    queueNavigation();
   }, [mode, zoom, size]);
 
   useEffect(() => {
@@ -1091,6 +1219,19 @@ export default function PdfNavigationView({
           Hand / Pan
         </button>
         <button
+          ref={documentButton}
+          aria-expanded={documentOpen}
+          aria-controls="document-panel"
+          onClick={() => {
+            history.invalidate();
+            setDocumentOpen(!documentOpen);
+            if (!documentOpen && window.innerWidth < 1050) setPanelOpen(false);
+          }}
+        >
+          <ToolIcon name="panel" />
+          Pages & markups
+        </button>
+        <button
           className="properties-toggle"
           ref={panelButton}
           aria-expanded={panelOpen}
@@ -1111,6 +1252,28 @@ export default function PdfNavigationView({
         )}
       </div>
       <div className="workspace-body">
+        {documentOpen && (
+          <DocumentPanel
+            pages={pages}
+            current={current}
+            session={session}
+            bookmarks={documentNavigation.bookmarks}
+            disabled={disabled}
+            close={() => {
+              setDocumentOpen(false);
+              documentButton.current?.focus();
+            }}
+            navigate={(page) => {
+              navigate(page);
+              host.current?.focus({ preventScroll: true });
+            }}
+            changeBookmarks={(bookmarks) => {
+              latestBookmarks.current = bookmarks;
+              reportNavigation(captureView(), bookmarks);
+            }}
+            reveal={revealMarkup}
+          />
+        )}
         <aside
           ref={panel}
           id="workspace-panel"
