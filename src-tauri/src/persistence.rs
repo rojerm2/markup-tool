@@ -263,18 +263,28 @@ fn export_destination(
     source: &Path,
     project: Option<&Path>,
 ) -> Result<PathBuf, String> {
+    protected_destination(path, source, project, "pdf")
+}
+pub(crate) fn protected_destination(
+    path: &Path,
+    source: &Path,
+    project: Option<&Path>,
+    extension: &str,
+) -> Result<PathBuf, String> {
     if !path.is_absolute()
         || path
             .extension()
             .and_then(|x| x.to_str())
-            .map(|x| x.eq_ignore_ascii_case("pdf"))
+            .map(|x| x.eq_ignore_ascii_case(extension))
             != Some(true)
         || path
             .file_name()
             .and_then(|x| x.to_str())
             .is_none_or(|x| x.contains(':'))
     {
-        return Err("Choose an absolute destination with the .pdf extension".into());
+        return Err(format!(
+            "Choose an absolute destination with the .{extension} extension"
+        ));
     }
     let target = path
         .parent()

@@ -2348,3 +2348,44 @@ summary[aria-disabled="true"] {
   width: 16px;
   height: 16px;
 }
+/* Optional export controls keep the canvas and default export action uncluttered. */
+.export-options {
+  margin: auto;
+  width: min(32rem, calc(100vw - 2rem));
+  max-height: 88vh;
+  overflow: auto;
+}
+.export-options form,
+.export-options fieldset,
+.export-options label {
+  display: grid;
+  gap: 0.65rem;
+}
+.export-options form {
+  gap: 1rem;
+}
+.export-options label:has(input[type="checkbox"]),
+.export-options label:has(input[type="radio"]) {
+  display: flex;
+  align-items: center;
+}
+.export-options fieldset {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.export-categories {
+  max-height: 10rem;
+  overflow: auto;
+  display: grid;
+  gap: 0.5rem;
+}
+.export-note {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.export-operation {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.4rem 1rem;
+}

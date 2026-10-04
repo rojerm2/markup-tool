@@ -2,12 +2,19 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { AnnotationSession } from "./annotationSession";
 import { serializeProject, type SourceIdentity } from "./projectFormat";
+import {
+  validateExportSelection,
+  type ExportSelection,
+} from "./exportSelection";
 
 export type ExportProgress =
   | "Reading PDF…"
   | "Preparing pages…"
   | "Adding markup…"
   | "Building PDF…"
+  | "Building report…"
+  | "Saving report…"
+  | "Opening print preview…"
   | "Saving PDF…";
 
 export function generateInWorker(
@@ -15,14 +22,17 @@ export function generateInWorker(
   session: AnnotationSession,
   signal: AbortSignal,
   onProgress?: (stage: ExportProgress) => void,
+  selection?: ExportSelection,
 ): Promise<Uint8Array> {
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
+    let finished = false;
     const worker = new Worker(
       new URL("./pdfExport.worker.ts", import.meta.url),
       { type: "module" },
     );
     const finish = () => {
+      finished = true;
       worker.terminate();
       signal.removeEventListener("abort", abort);
     };
@@ -32,10 +42,12 @@ export function generateInWorker(
     };
     signal.addEventListener("abort", abort, { once: true });
     worker.onerror = (event) => {
+      if (finished) return;
       finish();
       reject(new Error(event.message));
     };
     worker.onmessage = ({ data }) => {
+      if (finished) return;
       if (data.progress) {
         onProgress?.(data.progress);
         return;
@@ -44,7 +56,10 @@ export function generateInWorker(
       if (data.error) reject(new Error(data.error));
       else resolve(data.bytes);
     };
-    worker.postMessage({ bytes, session }, [bytes.buffer]);
+    worker.postMessage(
+      { bytes, session, ...(selection ? { selection } : {}) },
+      [bytes.buffer],
+    );
   });
 }
 
@@ -55,9 +70,14 @@ export async function exportPdf(
   session: AnnotationSession,
   signal: AbortSignal,
   onProgress?: (stage: ExportProgress) => void,
+  options?: ExportSelection,
 ): Promise<string | null> {
   // Reuse schema/resource validation; this does not change the saved baseline.
   serializeProject(source, session);
+  const selection = options
+    ? validateExportSelection(options, source.pages, session)
+    : undefined;
+  signal.throwIfAborted();
   const path = await save({
     title: "Export Annotated PDF",
     defaultPath: source.filename.replace(/\.pdf$/i, "") + "_Marked.pdf",
@@ -71,7 +91,13 @@ export async function exportPdf(
     await invoke<ArrayBuffer>("read_export_source", identity),
   );
   signal.throwIfAborted();
-  const output = await generateInWorker(bytes, session, signal, onProgress);
+  const output = await generateInWorker(
+    bytes,
+    session,
+    signal,
+    onProgress,
+    selection,
+  );
   signal.throwIfAborted();
   onProgress?.("Saving PDF…");
   // Only small metadata is JSON. Keep PDF bytes binary across the native bridge.
@@ -84,7 +110,6 @@ export async function exportPdf(
   await invoke("write_export", output, {
     headers: { "x-export-metadata": metadata },
   });
-  signal.throwIfAborted();
   return path;
 }
 
@@ -94,15 +119,26 @@ export async function printPdf(
   session: AnnotationSession,
   signal: AbortSignal,
   onProgress?: (stage: ExportProgress) => void,
+  options?: ExportSelection,
 ): Promise<void> {
   serializeProject(source, session);
+  const selection = options
+    ? validateExportSelection(options, source.pages, session)
+    : undefined;
+  signal.throwIfAborted();
   const identity = { sourcePath, size: source.size, sha256: source.sha256 };
   onProgress?.("Reading PDF…");
   const bytes = new Uint8Array(
     await invoke<ArrayBuffer>("read_export_source", identity),
   );
   signal.throwIfAborted();
-  const output = await generateInWorker(bytes, session, signal, onProgress);
+  const output = await generateInWorker(
+    bytes,
+    session,
+    signal,
+    onProgress,
+    selection,
+  );
   signal.throwIfAborted();
   const metadata = JSON.stringify({
     ...identity,
@@ -111,6 +147,7 @@ export async function printPdf(
     /[^\x20-\x7e]/g,
     (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
   );
+  onProgress?.("Opening print preview…");
   await invoke("print_annotated_pdf", output, {
     headers: { "x-print-metadata": metadata },
   });

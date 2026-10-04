@@ -68,6 +68,28 @@ Export runs in a dedicated worker and preserves original PDF streams rather
 than rasterizing the document. The full PDF is rewritten. Binary IPC avoids
 JSON arrays; native source verification streams through a bounded buffer.
 
+Export selection is validated before file dialogs and again against the
+actual PDF page count. Filtering retains original page numbers until vector
+annotations are applied; selected pages are copied in document order to the
+output. Locked categories do not prohibit output, while hidden-category
+inclusion is an explicit policy. Page legends lose excluded rows and empty
+legends are omitted. Print uses the same generation pipeline and selection.
+
+Each export/print owns a separate abort controller combined with the document
+signal. Worker termination stops CPU processing and ignores late messages.
+Cancellation is disabled during atomic publication; no post-publication abort
+check can misreport a completed file as cancelled. Annotation history and the
+saved baseline are independent of the immutable export snapshot.
+
+Report workers receive validated annotation state, selection and the filename,
+without PDF bytes or source paths. The shared model supplies individual rows,
+counts and separate unit/calibration totals. CSV neutralizes formula-like
+text; PDF wraps and paginates with the bundled verified font. CSV saves require
+the main window, native-dialog path authorization, bounded UTF-8 binary data,
+source identity revalidation and a protected atomic destination. PDF reports
+reuse the protected PDF writer. Reports introduce no new dependencies or
+filesystem permissions.
+
 The application identifier remains `com.orcific.pdf-markup-tool` across
 releases to retain local preferences and recent-files storage.
 

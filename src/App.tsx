@@ -46,6 +46,14 @@ import {
   writeProject,
 } from "./services/projectService";
 import { exportPdf, printPdf } from "./services/exportService";
+import { exportReport } from "./services/reportService";
+import {
+  defaultExportSelection,
+  type ExportSelection,
+} from "./services/exportSelection";
+import ExportOptions, {
+  type ExportAction,
+} from "./components/Toolbar/ExportOptions";
 import { SessionHistory } from "./services/sessionHistory";
 import type { PDFPageProxy } from "pdfjs-dist";
 import {
@@ -198,6 +206,20 @@ function AppContent() {
   const [error, setError] = useState<string | null>(null),
     [notice, setNotice] = useState<string | null>(null);
   const [exportProgress, setExportProgress] = useState("Exporting…");
+  const [exportOptions, setExportOptions] = useState(false);
+  const operationController = useRef<AbortController | null>(null);
+  const [operationStarted, setOperationStarted] = useState<number | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [cancelRequested, setCancelRequested] = useState(false);
+  const exportOptionsButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (operationStarted === null) return;
+    const timer = setInterval(
+      () => setElapsed(Math.floor((Date.now() - operationStarted) / 1000)),
+      1000,
+    );
+    return () => clearInterval(timer);
+  }, [operationStarted]);
   const [question, setQuestion] = useState(false);
   const pending = useRef<((choice: Choice) => void) | null>(null);
   const sessionKeys = useRef<{
@@ -380,6 +402,15 @@ function AppContent() {
       await task();
     } catch (err) {
       if (alive.current) {
+        if (
+          err &&
+          typeof err === "object" &&
+          "name" in err &&
+          err.name === "AbortError"
+        ) {
+          setNotice("Cancelled. No output file was saved.");
+          return;
+        }
         playActionSound("error");
         setError(
           `${err instanceof Error ? err.message : String(err)} Please retry or choose another file.`,
@@ -390,6 +421,8 @@ function AppContent() {
       replacing.current = false;
       if (alive.current) {
         setOperation(null);
+        operationController.current = null;
+        setOperationStarted(null);
         if (kind === "opening" && live.current && dirty(live.current))
           live.current.recovery.schedule(live.current);
         if (kind !== "exporting" && kind !== "printing") setNotice(null);
@@ -397,22 +430,51 @@ function AppContent() {
     }
   }
 
-  async function exportCurrent() {
+  async function exportCurrent(
+    options?: ExportSelection,
+    action: ExportAction = "pdf",
+  ) {
     await run("exporting", async () => {
       const snapshot = live.current;
       if (!snapshot) return;
       snapshot.history.invalidate();
-      setExportProgress("Choosing destination…");
-      const path = await exportPdf(
-        snapshot.sourcePath,
-        snapshot.projectPath,
-        snapshot.source,
-        snapshot.session,
+      const controller = new AbortController();
+      operationController.current = controller;
+      setCancelRequested(false);
+      setElapsed(0);
+      setOperationStarted(Date.now());
+      const signal = AbortSignal.any([
+        controller.signal,
         snapshot.controller.signal,
-        setExportProgress,
-      );
+      ]);
+      setExportProgress("Choosing destination…");
+      const path =
+        action === "csv-report" || action === "pdf-report"
+          ? await exportReport(
+              snapshot.sourcePath,
+              snapshot.projectPath,
+              snapshot.source,
+              snapshot.session,
+              options ?? defaultExportSelection(snapshot.source.pages),
+              action === "csv-report" ? "csv" : "pdf",
+              signal,
+              setExportProgress,
+            )
+          : await exportPdf(
+              snapshot.sourcePath,
+              snapshot.projectPath,
+              snapshot.source,
+              snapshot.session,
+              signal,
+              setExportProgress,
+              options,
+            );
       if (path && alive.current && live.current?.id === snapshot.id) {
-        setFileResult({ id: ++fileResultId.current, kind: "export", path });
+        setFileResult({
+          id: ++fileResultId.current,
+          kind: action === "pdf" ? "export" : "report",
+          path,
+        });
         setNotice(
           `Exported ${path.split(/[\\/]/).pop()}. Editable project unchanged.`,
         );
@@ -421,18 +483,24 @@ function AppContent() {
     });
   }
 
-  async function printCurrent() {
+  async function printCurrent(options?: ExportSelection) {
     await run("printing", async () => {
       const snapshot = live.current;
       if (!snapshot) return;
       snapshot.history.cancelSnapshotDrafts();
+      const controller = new AbortController();
+      operationController.current = controller;
+      setCancelRequested(false);
+      setElapsed(0);
+      setOperationStarted(Date.now());
       setExportProgress("Preparing print…");
       await printPdf(
         snapshot.sourcePath,
         snapshot.source,
         snapshot.session,
-        snapshot.controller.signal,
+        AbortSignal.any([controller.signal, snapshot.controller.signal]),
         setExportProgress,
+        options,
       );
       if (alive.current)
         setNotice(
@@ -742,6 +810,17 @@ function AppContent() {
           >
             Print
           </button>
+          <button
+            ref={exportOptionsButton}
+            disabled={!work || !!operation}
+            onClick={() => {
+              live.current?.history.cancelSnapshotDrafts();
+              live.current?.history.invalidate();
+              setExportOptions(true);
+            }}
+          >
+            Export options…
+          </button>
         </div>
         <details ref={preferences} className="ui-preferences">
           <summary>Preferences</summary>
@@ -821,6 +900,48 @@ function AppContent() {
         {work && recoveryStatus === "protected" && " · Recovery up to date"}
         {work && recoveryStatus === "writing" && " · Updating recovery…"}
       </p>
+      {(operation === "exporting" || operation === "printing") &&
+        operationStarted !== null && (
+          <div className="export-operation" role="status">
+            <span>
+              {exportProgress} · {elapsed}s elapsed
+            </span>
+            <button
+              disabled={
+                cancelRequested ||
+                [
+                  "Choosing destination…",
+                  "Saving PDF…",
+                  "Saving report…",
+                  "Opening print preview…",
+                ].includes(exportProgress)
+              }
+              onClick={() => {
+                setCancelRequested(true);
+                operationController.current?.abort();
+              }}
+            >
+              {cancelRequested ? "Cancelling…" : "Cancel"}
+            </button>
+          </div>
+        )}
+      {exportOptions && work && (
+        <ExportOptions
+          session={work.session}
+          pageCount={work.source.pages}
+          currentPage={work.navigation.view.page}
+          onClose={() => {
+            setExportOptions(false);
+            exportOptionsButton.current?.focus();
+          }}
+          onExport={(selection, action) => {
+            setExportOptions(false);
+            exportOptionsButton.current?.focus();
+            if (action === "print") void printCurrent(selection);
+            else void exportCurrent(selection, action);
+          }}
+        />
+      )}
       <RecoveryPanel
         entries={recoveries}
         disabled={!!operation}

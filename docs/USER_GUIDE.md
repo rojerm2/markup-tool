@@ -149,7 +149,39 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 Export preserves the original pages as vectors and retains original image streams. The PDF is parsed and written in a dedicated worker, without per-object timer delays. Output crosses the native bridge as binary bytes; it is not expanded into a number array or JSON. Source revalidation uses a 64 KiB buffer. The status line shows preparing, building, and saving stages; these are stages, not estimated percentages.
 
-Export still rewrites the full PDF, so complexity, file size, disk speed, and available memory affect duration. This is not incremental PDF saving. The current 256 MiB input/output limits remain.
+Export still parses the source PDF, so complexity, file size, disk speed, and available memory affect duration. All-page export rewrites the full PDF; selected-page export copies the chosen pages with their original vectors and images into a new PDF. This is not incremental PDF saving. The current 256 MiB input/output limits remain.
+
+**Export Annotated PDF** keeps the usual one-click all-page workflow. Use
+**Export options…** to choose all pages, the current page, or ranges such as
+`1, 3-5`, then select categories and whether to include unassigned and hidden
+markup. Hidden content is included by default, matching earlier exports;
+locked markup can always be exported. The preview shows the selected page and
+markup counts. Pages keep their original document order. **Print annotated
+pages** uses the same selection and vector output as export.
+
+Processing shows real stages and elapsed seconds. **Cancel** stops processing
+without publishing a partial output; source reading may finish before the
+cancellation is acknowledged. Cancel is unavailable while choosing a native
+destination, during the final atomic save, or while opening print preview.
+Cancel the native Save dialog to return without creating a file. A completed
+save is reported as successful even if cancellation arrives afterward.
+
+Choose **CSV markup report** or **PDF markup report** in the same options
+dialog. Reports list source and exported page numbers, markup type, category,
+color, annotation text, counts and measurements. Length, area and perimeter
+totals remain separate by unit and calibrated/uncalibrated status. Area units
+are square units. Measurements are review aids; check page calibration and
+drawing accuracy before relying on quantities. Review annotation text before
+sharing reports. Reports contain the PDF filename, never an automatic full
+source path or embedded original PDF.
+
+CSV uses UTF-8 with a BOM, quoted cells and one rectangular table. **Record
+type** identifies individual Markup rows, per-page/category/type Count rows,
+and measurement Total rows. Text that could become a spreadsheet formula is
+prefixed with an apostrophe. PDF reports wrap and paginate text using the
+bundled font; unsupported characters appear as `[U+XXXX]`, while CSV retains
+the original text. CSV output is limited to 64 MiB. Report destinations cannot
+replace the source PDF or current editable project, including hard-link aliases.
 
 Run the opt-in synthetic benchmark and bridge microbenchmark separately from normal tests:
 

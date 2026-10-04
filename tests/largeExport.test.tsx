@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { PDFDocument, PDFName, ParseSpeeds } from "pdf-lib";
 import { generateAnnotatedPdf } from "../src/services/pdfExport";
 import { emptySession } from "../src/services/annotationSession";
+import { defaultExportSelection } from "../src/services/exportSelection";
 
 it.skipIf(process.env.PDF_MARKUP_BENCHMARK !== "1")(
   "benchmarks a roughly 100 MB, 32-page export and checks content preservation",
@@ -109,6 +110,36 @@ it.skipIf(process.env.PDF_MARKUP_BENCHMARK !== "1")(
     expect(reopened.getPage(31).node.Resources()!.toString()).not.toContain(
       "Markup",
     );
+    const selectedStart = performance.now();
+    const selectedOutput = await generateAnnotatedPdf(
+      source,
+      session,
+      undefined,
+      undefined,
+      { ...defaultExportSelection(32), pages: [1, 32] },
+    );
+    const selectedExportMs = Math.round(performance.now() - selectedStart);
+    const selectedPdf = await PDFDocument.load(selectedOutput, {
+      parseSpeed: ParseSpeeds.Fastest,
+    });
+    expect(selectedPdf.getPageCount()).toBe(2);
+    for (const [outputPage, originalPage] of [
+      [0, 0],
+      [1, 31],
+    ]) {
+      const images = selectedPdf
+        .getPage(outputPage)
+        .node.Resources()!
+        .lookup(PDFName.of("XObject")) as import("pdf-lib").PDFDict;
+      const image = images.lookup(
+        images
+          .keys()
+          .find((key) => key.toString().startsWith("/FloorPlanImage"))!,
+      ) as import("pdf-lib").PDFRawStream;
+      expect(image.contents.length).toBe(1024 * 1024 * 3);
+      expect(image.contents[0]).toBe(240 - originalPage);
+      expect(image.contents.at(-1)).toBe(240 - originalPage);
+    }
     mkdirSync("internal_docs/performance-qa", { recursive: true });
     writeFileSync("internal_docs/performance-qa/large-32-pages.pdf", source);
     writeFileSync(
@@ -125,6 +156,8 @@ it.skipIf(process.env.PDF_MARKUP_BENCHMARK !== "1")(
       baselineSaveMs: Math.round(baselineEnd - baselineLoaded),
       baselineTotalMs: Math.round(baselineEnd - baselineStart),
       optimizedTotalMs: Math.round(optimizedMs),
+      selectedExportMs,
+      selectedOutputBytes: selectedOutput.length,
       stages,
     };
     writeFileSync(

@@ -1,21 +1,27 @@
-import { generateAnnotatedPdf } from "./pdfExport";
+import { buildMarkupReport, markupReportCsv } from "./markupReport";
+import { generateReportPdf } from "./reportPdf";
 import type { AnnotationSession } from "./annotationSession";
 import type { ExportSelection } from "./exportSelection";
+
 self.onmessage = async ({
   data,
 }: MessageEvent<{
-  bytes: Uint8Array;
   session: AnnotationSession;
-  selection?: ExportSelection;
+  selection: ExportSelection;
+  pageCount: number;
+  filename: string;
+  format: "csv" | "pdf";
 }>) => {
   try {
-    const bytes = await generateAnnotatedPdf(
-      data.bytes,
+    const report = buildMarkupReport(
       data.session,
-      undefined,
-      (progress) => self.postMessage({ progress }),
       data.selection,
+      data.pageCount,
     );
+    const bytes =
+      data.format === "csv"
+        ? new TextEncoder().encode(markupReportCsv(report))
+        : await generateReportPdf(report, data.filename);
     self.postMessage({ bytes }, { transfer: [bytes.buffer] });
   } catch (error) {
     self.postMessage({

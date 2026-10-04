@@ -395,6 +395,7 @@ it("opens a bundled project without a PDF picker, preserves its filename and exp
     expect.anything(),
     expect.any(AbortSignal),
     expect.any(Function),
+    undefined,
   );
 });
 
@@ -1390,6 +1391,62 @@ it("cancelled/failed exports preserve dirty baseline and unmount aborts a pendin
   view.unmount();
   expect(signal.aborted).toBe(true);
   await act(async () => pendingExport.resolve("C:/late.pdf"));
+});
+it("cancel stops only the current export and retry captures the same committed state", async () => {
+  render(<App />);
+  await openPdf();
+  click("Thick");
+  let signal!: AbortSignal;
+  vi.mocked(exports.exportPdf).mockImplementationOnce(async (...args) => {
+    signal = args[4];
+    args[5]?.("Building PDF…");
+    return await new Promise((_, reject) =>
+      signal.addEventListener("abort", () => reject(signal.reason), {
+        once: true,
+      }),
+    );
+  });
+  click("Export Annotated PDF");
+  click("Cancel");
+  await idle();
+  expect(signal.aborted).toBe(true);
+  expect(status()).toContain("Cancelled. No output file was saved.");
+  expect(status()).toContain("Unsaved changes");
+  expect(screen.queryByRole("alert")).toBeNull();
+  vi.mocked(exports.exportPdf).mockResolvedValueOnce("C:/retry.pdf");
+  click("Export Annotated PDF");
+  await idle();
+  const args = vi.mocked(exports.exportPdf).mock.calls[1];
+  expect(args[4].aborted).toBe(false);
+  expect(args[3].drawing.width).toBe(20);
+  expect(status()).toContain("Exported retry.pdf");
+  expect(status()).toContain("Unsaved changes");
+});
+it("advanced export and print route validated page selection without saving the editable project", async () => {
+  render(<App />);
+  await openPdf();
+  click("Next page");
+  click("Export options…");
+  fireEvent.click(screen.getByLabelText("Current page (2)"));
+  click("Export");
+  await idle();
+  expect(vi.mocked(exports.exportPdf).mock.calls[0][6]).toMatchObject({
+    pages: [2],
+    categoryIds: null,
+    includeHidden: true,
+  });
+  click("Export options…");
+  fireEvent.click(screen.getByLabelText("Current page (2)"));
+  fireEvent.change(screen.getByLabelText("Output"), {
+    target: { value: "print" },
+  });
+  click("Prepare print");
+  await idle();
+  expect(vi.mocked(exports.printPdf).mock.calls[0][5]).toMatchObject({
+    pages: [2],
+  });
+  expect(files.writeProject).not.toHaveBeenCalled();
+  expect(status()).not.toContain("Unsaved changes");
 });
 it("export during unfinished move/draw cancels previews and captures only committed geometry", async () => {
   const original = await openEditable();

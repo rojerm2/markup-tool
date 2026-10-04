@@ -22,6 +22,11 @@ import type { ExportProgress } from "./exportService";
 import type { AnnotationSession } from "./annotationSession";
 import { highlightGroups } from "./annotationEditing";
 import {
+  selectExportSession,
+  validateExportSelection,
+  type ExportSelection,
+} from "./exportSelection";
+import {
   measurementPath,
   measurementTextLayout,
   validMeasurement,
@@ -42,6 +47,7 @@ export async function generateAnnotatedPdf(
   session: AnnotationSession,
   fontBytes?: Uint8Array,
   onProgress?: (stage: ExportProgress) => void,
+  options?: ExportSelection,
 ): Promise<Uint8Array> {
   onProgress?.("Preparing pages…");
   // This work runs in a dedicated worker. Per-object timer yields throttle large
@@ -51,6 +57,11 @@ export async function generateAnnotatedPdf(
     parseSpeed: ParseSpeeds.Fastest,
   });
   const context = pdf.context;
+  const selection = options
+    ? validateExportSelection(options, pdf.getPageCount(), session)
+    : undefined;
+  if (selection)
+    session = selectExportSession(session, selection, pdf.getPageCount());
   const notes = session.notes ?? [];
   if (!validNotes(notes, [], pdf.getPageCount()))
     throw new Error("Invalid note or arrow data.");
@@ -375,5 +386,14 @@ export async function generateAnnotatedPdf(
   }
   // Transparency requires PDF 1.4; pdf-lib writes a 1.7 header.
   onProgress?.("Building PDF…");
+  if (selection && selection.pages.length !== pdf.getPageCount()) {
+    const selected = await PDFDocument.create();
+    const pages = await selected.copyPages(
+      pdf,
+      selection.pages.map((p) => p - 1),
+    );
+    pages.forEach((page) => selected.addPage(page));
+    return selected.save({ objectsPerTick: Infinity });
+  }
   return pdf.save({ objectsPerTick: Infinity });
 }

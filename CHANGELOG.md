@@ -6,6 +6,12 @@ Versioned changes follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Optional page/category export and selected-page printing, cancellable worker
+  processing, elapsed time and explicit processing/save stages.
+- CSV and paginated PDF markup reports with source/export page mapping,
+  annotation text, counts and unit/calibration-separated measurement totals;
+  formula-safe CSV text and protected atomic report saving.
+
 - Local reusable drawing presets, category sets and original symbol groups;
   portable bounded `.pmpreset` import/export, previews, explicit replacement,
   conflict-safe category mapping and atomic undo for applying and placing.
