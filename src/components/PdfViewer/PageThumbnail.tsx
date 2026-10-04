@@ -8,6 +8,7 @@ import { shapePath } from "../../services/shapes";
 import NoteGraphic from "../Annotations/NoteGraphic";
 import PageLegendGraphic from "../Annotations/PageLegendGraphic";
 import { objectVisible } from "../../services/categoryPolicy";
+import MeasurementGraphic from "../Annotations/MeasurementGraphic";
 
 export default function PageThumbnail({
   page,
@@ -71,11 +72,21 @@ export default function PageThumbnail({
   const keys = (session.pageLegends ?? []).filter(
     (k) => k.page === page.pageNumber && objectVisible(session, k.id),
   );
-  const count = strokes.length + shapes.length + notes.length + keys.length;
+  const measurements = (session.measurements ?? []).filter(
+    (m) => m.page === page.pageNumber && objectVisible(session, m.id),
+  );
+  const count =
+    strokes.length +
+    shapes.length +
+    notes.length +
+    keys.length +
+    measurements.length;
   // Tiny previews should not process enormous paths or thousands of text glyphs.
   const detailed =
     count <= 200 &&
-    strokes.reduce((n, s) => n + s.points.length, 0) <= 20000 &&
+    strokes.reduce((n, s) => n + s.points.length, 0) +
+      measurements.reduce((n, m) => n + m.points.length, 0) <=
+      20000 &&
     notes.reduce((n, s) => n + (s.type === "text" ? s.text.length : 0), 0) <=
       10000;
   const point = (p: { x: number; y: number }) => pdfToViewport(p, viewport);
@@ -117,6 +128,16 @@ export default function PageThumbnail({
             ))}
             {notes.map((n) => (
               <NoteGraphic key={n.id} note={n} viewport={viewport} />
+            ))}
+            {measurements.map((m) => (
+              <MeasurementGraphic
+                key={m.id}
+                value={m}
+                viewport={viewport}
+                calibration={session.calibrations?.find(
+                  (c) => c.page === page.pageNumber,
+                )}
+              />
             ))}
             {keys.map((k) => (
               <PageLegendGraphic

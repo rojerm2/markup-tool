@@ -5,10 +5,12 @@ export default function FontSizeControl({
   value,
   label,
   onChange,
+  disabled = false,
 }: {
   value: number;
   label: string;
   onChange: (size: number) => void;
+  disabled?: boolean;
 }) {
   const [input, setInput] = useState(String(value));
   useEffect(() => setInput(String(value)), [value]);
@@ -24,6 +26,7 @@ export default function FontSizeControl({
             max={MAX_TEXT_SIZE}
             step="0.5"
             value={input}
+            disabled={disabled}
             onBlur={() => setInput(String(value))}
             onChange={(e) => {
               setInput(e.target.value);
@@ -41,6 +44,7 @@ export default function FontSizeControl({
         max={MAX_TEXT_SIZE}
         step="0.5"
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
       />
       <div className="width-scale">

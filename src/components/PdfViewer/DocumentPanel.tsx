@@ -296,7 +296,14 @@ export default function DocumentPanel({
                 onChange={(e) => setType(e.target.value)}
               >
                 <option value="">All types</option>
-                {["highlight", "shape", "text", "arrow", "legend"].map((t) => (
+                {[
+                  "highlight",
+                  "shape",
+                  "text",
+                  "arrow",
+                  "legend",
+                  "measurement",
+                ].map((t) => (
                   <option key={t} value={t}>
                     {t[0].toUpperCase() + t.slice(1)}
                   </option>

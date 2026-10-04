@@ -8,7 +8,11 @@ import { sessionReducer } from "./annotationSession";
 import { serializeProject } from "./projectFormat";
 import type { Highlight } from "../types/annotation";
 import type { Shape } from "./shapes";
-import type { Measurement } from "./measurements";
+import {
+  measurementTextLayout,
+  type Measurement,
+  type PageCalibration,
+} from "./measurements";
 import { notePoint, type NoteObject } from "./notes";
 import {
   keyMatrix,
@@ -79,6 +83,7 @@ export function selectionBounds(
   objects: SelectedObject[],
   legends: Legend[],
   viewport: PageViewport,
+  calibrations: PageCalibration[] = [],
 ) {
   const bounds = {
     left: Infinity,
@@ -98,9 +103,15 @@ export function selectionBounds(
     const v = o.value;
     if (o.kind === "highlight")
       o.value.points.forEach((p) => include(p, o.value.width / 2));
-    else if (o.kind === "measurement")
+    else if (o.kind === "measurement") {
       o.value.points.forEach((p) => include(p, o.value.width / 2));
-    else if (o.kind === "shape") {
+      const box = measurementTextLayout(
+        o.value,
+        calibrations.find((c) => c.page === o.value.page),
+      );
+      for (const x of [box.x, box.x + box.width])
+        for (const y of [box.y, box.y - box.height]) include({ x, y }, 0.25);
+    } else if (o.kind === "shape") {
       include(o.value.a, o.value.width / 2);
       include(o.value.b, o.value.width / 2);
     } else if (o.kind === "note" && o.value.type === "arrow") {
@@ -152,7 +163,12 @@ export function copyMarkups(
     categories: Object.fromEntries(
       objects.map((o) => [o.value.id, objectCategory(session, o.value.id)]),
     ),
-    bounds: selectionBounds(objects, session.legends, viewport),
+    bounds: selectionBounds(
+      objects,
+      session.legends,
+      viewport,
+      session.calibrations,
+    ),
   };
 }
 
@@ -160,6 +176,7 @@ export function movementLimits(
   objects: SelectedObject[],
   legends: Legend[],
   viewportFor: (page: number) => PageViewport,
+  calibrations: PageCalibration[] = [],
 ) {
   let minX = -Infinity,
     maxX = Infinity,
@@ -171,6 +188,7 @@ export function movementLimits(
         objects.filter((o) => o.value.page === page),
         legends,
         viewport,
+        calibrations,
       );
     minX = Math.max(minX, Math.min(0, -bounds.left));
     maxX = Math.min(maxX, Math.max(0, viewport.width - bounds.right));
@@ -194,6 +212,7 @@ export function moveMarkups(
     objects,
     session.legends,
     viewportFor,
+    session.calibrations,
   );
   dx = Math.max(minX, Math.min(maxX, dx));
   dy = Math.max(minY, Math.min(maxY, dy));
@@ -481,6 +500,62 @@ export function pasteMarkups(
   const next = sessionReducer(session, action);
   if (next === session)
     throw new Error("The markups cannot be placed safely on this page.");
+  // Measurement labels use the destination scale, so their bounds may change on paste.
+  const pastedBounds = selectionBounds(
+      selectedObjects(next, ids),
+      next.legends,
+      viewport,
+      next.calibrations,
+    ),
+    pastedWidth = pastedBounds.right - pastedBounds.left,
+    pastedHeight = pastedBounds.bottom - pastedBounds.top;
+  if (pastedWidth > viewport.width || pastedHeight > viewport.height)
+    throw new Error("The selection and its labels are larger than this page.");
+  const dx =
+      Math.max(0, -pastedBounds.left) -
+      Math.max(0, pastedBounds.right - viewport.width),
+    dy =
+      Math.max(0, -pastedBounds.top) -
+      Math.max(0, pastedBounds.bottom - viewport.height);
+  if (dx || dy) {
+    const adjusted = moveMarkups(next, ids, dx, dy, () => viewport);
+    if (adjusted.type !== "bulk") throw new Error("Invalid paste adjustment.");
+    for (const moved of adjusted.actions) {
+      const index = actions.findIndex(
+        (a) =>
+          (a.type === "commit" &&
+            moved.type === "move-stroke" &&
+            a.stroke.id === moved.before.id) ||
+          (a.type === "put-measurement" &&
+            moved.type === "put-measurement" &&
+            a.measurement.id === moved.measurement.id) ||
+          (a.type === "put-shape" &&
+            moved.type === "put-shape" &&
+            a.shape.id === moved.shape.id) ||
+          (a.type === "put-note" &&
+            moved.type === "put-note" &&
+            a.note.id === moved.note.id) ||
+          (a.type === "put-key" &&
+            moved.type === "put-key" &&
+            a.key.id === moved.key.id),
+      );
+      if (index < 0) throw new Error("Invalid paste adjustment.");
+      const original = actions[index];
+      if (moved.type === "move-stroke" && original.type === "commit")
+        actions[index] = {
+          ...original,
+          stroke: { ...original.stroke, points: moved.points },
+        };
+      else if (
+        moved.type === "put-measurement" ||
+        moved.type === "put-shape" ||
+        moved.type === "put-note" ||
+        moved.type === "put-key"
+      )
+        actions[index] = { ...moved, before: undefined };
+      else throw new Error("Invalid paste adjustment.");
+    }
+  }
   serializeProject(
     {
       reference: "clipboard.pdf",
@@ -489,7 +564,7 @@ export function pasteMarkups(
       size: 1,
       pages: 10000,
     },
-    next,
+    sessionReducer(session, action),
   );
   return { action, ids };
 }

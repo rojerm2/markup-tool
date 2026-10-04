@@ -3,8 +3,10 @@ import { keyPoint, layoutLegend } from "./pageLegend";
 import { notePoint } from "./notes";
 import type { Point } from "./coordinates";
 import { objectCategory } from "./categoryPolicy";
+import { measurementLabel, measurementAnchor } from "./measurements";
 
-export type MarkupType = "highlight" | "shape" | "text" | "arrow" | "legend";
+export type MarkupType =
+  "highlight" | "shape" | "text" | "arrow" | "legend" | "measurement";
 export type MarkupRow = {
   id: string;
   page: number;
@@ -79,6 +81,20 @@ export function markupRows(session: AnnotationSession): MarkupRow[] {
         k.width / 2,
         layoutLegend(k, session.legends).height / 2,
       ),
+    });
+  for (const m of session.measurements ?? [])
+    rows.push({
+      id: m.id,
+      page: m.page,
+      type: "measurement",
+      label: `${m.type[0].toUpperCase() + m.type.slice(1)} · ${measurementLabel(
+        m,
+        session.calibrations?.find((c) => c.page === m.page),
+      )}`,
+      categoryId: null,
+      category: "Unassigned",
+      color: m.color,
+      center: measurementAnchor(m),
     });
   for (const row of rows) {
     const id = objectCategory(session, row.id);

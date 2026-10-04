@@ -21,6 +21,13 @@ import { PDFDocument, PDFNumber, ParseSpeeds } from "pdf-lib";
 import type { ExportProgress } from "./exportService";
 import type { AnnotationSession } from "./annotationSession";
 import { highlightGroups } from "./annotationEditing";
+import {
+  measurementPath,
+  measurementTextLayout,
+  validMeasurement,
+  validCalibration,
+  MAX_MEASUREMENTS,
+} from "./measurements";
 
 // PDF numbers cannot use exponent notation. Keep the actual stored precision.
 export function pdfNumber(value: number): string {
@@ -48,13 +55,22 @@ export async function generateAnnotatedPdf(
   if (!validNotes(notes, [], pdf.getPageCount()))
     throw new Error("Invalid note or arrow data.");
   const keys = session.pageLegends ?? [];
+  const measurements = session.measurements ?? [],
+    calibrations = session.calibrations ?? [];
+  if (
+    measurements.length > MAX_MEASUREMENTS ||
+    measurements.some((m) => !validMeasurement(m, pdf.getPageCount())) ||
+    calibrations.some((c) => !validCalibration(c, pdf.getPageCount())) ||
+    new Set(calibrations.map((c) => c.page)).size !== calibrations.length
+  )
+    throw new Error("Invalid measurement or page calibration data.");
   for (const k of keys) {
     const error = legendTextError(k, session.legends);
     if (error) throw new Error(error);
   }
   pdf.registerFontkit(fontkit);
   const font =
-    keys.length || notes.some((n) => n.type === "text")
+    keys.length || notes.some((n) => n.type === "text") || measurements.length
       ? await pdf.embedFont(
           fontBytes ??
             new Uint8Array(await (await fetch(fontUrl)).arrayBuffer()),
@@ -73,11 +89,13 @@ export async function generateAnnotatedPdf(
     const pageKeys = keys.filter((k) => k.page === index + 1);
     const shapes = (session.shapes ?? []).filter((s) => s.page === index + 1);
     const pageNotes = notes.filter((n) => n.page === index + 1);
+    const pageMeasurements = measurements.filter((m) => m.page === index + 1);
     if (
       !pageNotes.length &&
       !strokes.length &&
       !pageKeys.length &&
-      !shapes.length
+      !shapes.length &&
+      !pageMeasurements.length
     )
       continue;
     const crop = page.getCropBox(),
@@ -294,6 +312,59 @@ export async function generateAnnotatedPdf(
             );
             x += textWidth(c, k.fontSize);
           }
+        }
+        commands.push("Q");
+      }
+    }
+    if (font && pageMeasurements.length) {
+      const fontName = page.node.newFontDictionary("MeasurementFont", font.ref),
+        opaque = page.node.newExtGState(
+          "MeasurementOpaque",
+          context.obj({
+            Type: "ExtGState",
+            CA: 1,
+            ca: 1,
+            BM: "Normal",
+            SMask: "None",
+          }),
+        ),
+        fill = page.node.newExtGState(
+          "MeasurementFill",
+          context.obj({
+            Type: "ExtGState",
+            CA: 1,
+            ca: 0.12,
+            BM: "Normal",
+            SMask: "None",
+          }),
+        );
+      const calibration = calibrations.find((c) => c.page === index + 1);
+      for (const m of pageMeasurements) {
+        commands.push(
+          `q ${m.type === "area" ? fill : opaque} gs ${clip}`,
+          `${rgb(m.color)} RG ${rgb(m.color)} rg ${pdfNumber(m.width)} w 1 j`,
+        );
+        for (const c of measurementPath(m))
+          commands.push(
+            c.op === "Z"
+              ? "h"
+              : `${c.points.flatMap((p) => [pdfNumber(p.x), pdfNumber(p.y)]).join(" ")} ${c.op.toLowerCase()}`,
+          );
+        commands.push(m.type === "area" ? "B" : "S", "Q");
+        const box = measurementTextLayout(m, calibration);
+        commands.push(
+          `q ${opaque} gs ${clip}`,
+          `1 0 0 -1 ${pdfNumber(box.x)} ${pdfNumber(box.y)} cm`,
+          `1 1 1 rg 0 0 ${pdfNumber(box.width)} ${pdfNumber(box.height)} re f`,
+          `${rgb(m.color)} RG .5 w 0 0 ${pdfNumber(box.width)} ${pdfNumber(box.height)} re S`,
+          `${rgb(m.color)} rg`,
+        );
+        let x = 3;
+        for (const c of box.text) {
+          commands.push(
+            `BT ${fontName} ${pdfNumber(m.fontSize)} Tf 1 0 0 -1 ${pdfNumber(x)} ${pdfNumber(box.baseline)} Tm ${font.encodeText(c)} Tj ET`,
+          );
+          x += textWidth(c, m.fontSize);
         }
         commands.push("Q");
       }

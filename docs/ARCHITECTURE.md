@@ -38,6 +38,14 @@ PDF viewports, gives objects and nested pointers fresh IDs, checks category poli
 and validates resulting project limits. Hidden categories affect workspace
 rendering only; locks are enforced centrally for every annotation mutation.
 
+Measurements store PDF points and per-page two-point calibrations. Shared
+geometry validates simple polygons, finite scales and bounded vertex counts;
+shared text layout and font advances drive canvas labels and PDF operators.
+Recalibration changes derived values without rewriting geometry; category locks
+protect those derived values. Paste carries geometry and style, then uses the
+destination scale and bounds its labels. Measurement/calibration data requires
+schema 4, while older annotation-only projects retain their compatible schema.
+
 Portable projects contain a versioned container, validated JSON metadata, and
 the original PDF bytes. The native layer checks length and SHA-256 identity,
 extracts embedded PDFs to owned temporary files, and prevents source-PDF

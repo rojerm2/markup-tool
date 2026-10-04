@@ -88,7 +88,12 @@ export default function SelectionOverlay({
     );
     setOffset({ x: g.dx * scale, y: g.dy * scale });
   }
-  const bounds = selectionBounds(objects, session.legends, viewport);
+  const bounds = selectionBounds(
+    objects,
+    session.legends,
+    viewport,
+    session.calibrations,
+  );
   return (
     <svg
       ref={svg}

@@ -19,6 +19,9 @@ Versioned changes follow [Semantic Versioning](https://semver.org/).
   layer and preserved in version 3 projects.
 - Mixed-markup selection with Shift-click and list checkboxes; group movement,
   category assignment, duplicate, copy/paste across pages and atomic undo/redo.
+- Per-page distance calibration and length, polygon area and perimeter tools;
+  editable measurement vertices, matching vector export/print labels and version
+  4 project storage. Uncalibrated values are identified explicitly.
 
 ## [0.3.0] - 2026-10-04
 

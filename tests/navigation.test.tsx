@@ -55,6 +55,284 @@ function selectBulkRows() {
   return boxes;
 }
 
+function measurementRect() {
+  vi.spyOn(SVGElement.prototype, "getBoundingClientRect").mockImplementation(
+    function (this: SVGElement) {
+      return this.closest("[data-page]")!
+        .querySelector("canvas")!
+        .getBoundingClientRect();
+    },
+  );
+}
+
+function measurementPoint(pageNumber: number, x: number, y: number) {
+  const box = screen
+    .getByLabelText(`PDF page ${pageNumber}`)
+    .getBoundingClientRect();
+  return {
+    clientX: box.left + (x * box.width) / 600,
+    clientY: box.top + ((800 - y) * box.height) / 800,
+  };
+}
+
+function measurementLine(pageNumber: number = 1) {
+  const svg = screen.getByLabelText(`Measurements for page ${pageNumber}`);
+  fireEvent.pointerDown(svg, {
+    button: 0,
+    pointerId: 7,
+    ...measurementPoint(pageNumber, 100, 200),
+  });
+  fireEvent.pointerMove(svg, {
+    buttons: 1,
+    pointerId: 7,
+    ...measurementPoint(pageNumber, 200, 200),
+  });
+  fireEvent.pointerUp(svg, {
+    pointerId: 7,
+    ...measurementPoint(pageNumber, 200, 200),
+  });
+}
+
+it("calibrates one page, measures length, recalibrates with undo and keeps other pages explicitly uncalibrated", () => {
+  measurementRect();
+  const history = new SessionHistory(emptySession);
+  render(<PdfNavigationView pages={[page(1), page(2)]} history={history} />);
+  const tool = screen.getByLabelText("Measurement tool");
+  fireEvent.change(tool, { target: { value: "measure-calibrate" } });
+  measurementLine();
+  expect(history.undoLabel).toBeUndefined();
+  fireEvent.scroll(
+    screen.getByRole("complementary", { name: "Tools and properties" }),
+  );
+  fireEvent.blur(window);
+  expect(screen.getByLabelText("Scale reference")).toBeDefined();
+  fireEvent.change(screen.getByLabelText("Known distance"), {
+    target: { value: "10" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply scale" }));
+  expect(history.present.calibrations![0].distance).toBe(10);
+  expect(history.present.calibrations![0].unit).toBe("m");
+  expect(history.undoLabel).toBe("Calibrate page");
+  measurementLine();
+  expect(history.present.measurements).toHaveLength(1);
+  const label = () =>
+    document.querySelector("[data-measurement-id] text")!.textContent;
+  expect(label()).toBe("10 m");
+  fireEvent.change(tool, { target: { value: "measure-calibrate" } });
+  fireEvent.change(screen.getByLabelText("Known distance"), {
+    target: { value: "20" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply scale" }));
+  expect(label()).toBe("20 m");
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(label()).toBe("10 m");
+  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+  measurementLine(2);
+  expect(history.present.measurements).toHaveLength(2);
+  expect(history.present.calibrations).toHaveLength(1);
+  expect(
+    screen.getByLabelText("Measurements for page 2").querySelector("text")!
+      .textContent,
+  ).toBe("100 PDF units (uncalibrated)");
+});
+
+it("draws simple area/perimeter polygons and cancels invalid, saved or panned drafts without undo entries", () => {
+  measurementRect();
+  const history = new SessionHistory(emptySession);
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  const tool = screen.getByLabelText("Measurement tool"),
+    host = screen.getByRole("region", { name: "PDF pages" });
+  fireEvent.change(tool, { target: { value: "measure-area" } });
+  const svg = screen.getByLabelText("Measurements for page 1");
+  const vertex = (x: number, y: number) =>
+    fireEvent.pointerDown(svg, {
+      button: 0,
+      pointerId: 7,
+      ...measurementPoint(1, x, y),
+    });
+  [
+    [100, 100],
+    [200, 100],
+    [200, 200],
+    [100, 200],
+  ].forEach(([x, y]) => vertex(x, y));
+  fireEvent.keyDown(host, { key: "Enter" });
+  expect(history.present.measurements?.[0].type).toBe("area");
+  expect(svg.querySelector("text")!.textContent).toBe(
+    "10,000 PDF units² (uncalibrated)",
+  );
+  const before = history.present;
+  [
+    [100, 100],
+    [200, 200],
+    [100, 200],
+    [200, 100],
+  ].forEach(([x, y]) => vertex(x, y));
+  fireEvent.keyDown(host, { key: "Enter" });
+  expect(history.present).toBe(before);
+  expect(screen.getByText(/simple polygon without crossing/)).toBeDefined();
+  vertex(100, 100);
+  vertex(200, 100);
+  act(() => history.cancelSnapshotDrafts());
+  fireEvent.keyDown(host, { key: "Enter" });
+  expect(history.present).toBe(before);
+  vertex(100, 100);
+  vertex(200, 100);
+  fireEvent.keyDown(host, { code: "Space", key: " " });
+  fireEvent.keyUp(host, { code: "Space", key: " " });
+  fireEvent.keyDown(host, { key: "Enter" });
+  expect(history.present).toBe(before);
+  fireEvent.change(tool, { target: { value: "measure-perimeter" } });
+  [
+    [100, 100],
+    [200, 100],
+    [200, 200],
+    [100, 200],
+  ].forEach(([x, y]) => vertex(x, y));
+  fireEvent.keyDown(host, { key: "Enter" });
+  expect(history.present.measurements?.[1].type).toBe("perimeter");
+  expect(svg.querySelectorAll("text")[1].textContent).toBe(
+    "400 PDF units (uncalibrated)",
+  );
+});
+
+it("selects measurements from the list, nudges with arrows, applies appearance atomically and respects category protection", () => {
+  measurementRect();
+  const measurement = {
+    id: "dimension",
+    page: 1,
+    type: "length" as const,
+    points: [
+      { x: 100, y: 200 },
+      { x: 200, y: 200 },
+    ],
+    color: "#0284c7",
+    width: 2,
+    fontSize: 12,
+  };
+  const history = new SessionHistory({
+    ...emptySession,
+    measurements: [measurement],
+    legends: [{ id: "walls", name: "Walls", color: "#facc15" }],
+    objectCategories: { dimension: "walls" },
+  });
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  fireEvent.click(screen.getByRole("button", { name: "Pages & markups" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Markups" }));
+  fireEvent.change(screen.getByLabelText("Markup type filter"), {
+    target: { value: "measurement" },
+  });
+  fireEvent.click(document.querySelector(".markup-jump")!);
+  const host = screen.getByRole("region", { name: "PDF pages" });
+  expect(document.activeElement).toBe(host);
+  fireEvent.keyDown(host, { key: "ArrowRight" });
+  expect(history.present.measurements![0].points[0].x).toBe(102);
+  const before = history.present;
+  fireEvent.click(screen.getByRole("button", { name: "Properties" }));
+  fireEvent.change(screen.getByLabelText("Measurement text size"), {
+    target: { value: "24" },
+  });
+  expect(history.present).toBe(before);
+  fireEvent.click(screen.getByRole("button", { name: "Apply appearance" }));
+  expect(history.present.measurements![0].fontSize).toBe(24);
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(history.present).toBe(before);
+  fireEvent.click(screen.getByRole("button", { name: "Legends (1)" }));
+  fireEvent.click(screen.getByRole("button", { name: "Lock category Walls" }));
+  fireEvent.change(screen.getByLabelText("Measurement tool"), {
+    target: { value: "measure-calibrate" },
+  });
+  expect(
+    screen
+      .getByRole("button", { name: "Calibrate page" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Hide category Walls" }));
+  expect(
+    screen
+      .getByLabelText("Measurements for page 1")
+      .querySelector("[data-measurement-id]"),
+  ).toBeNull();
+});
+
+it("edits measurement vertices in one undo step, cancels stale drags and appearance drafts, and clears empty-space selection", () => {
+  measurementRect();
+  const value = {
+      id: "dimension",
+      page: 1,
+      type: "length" as const,
+      points: [
+        { x: 100, y: 200 },
+        { x: 200, y: 200 },
+      ],
+      color: "#0284c7",
+      width: 2,
+      fontSize: 12,
+    },
+    history = new SessionHistory({ ...emptySession, measurements: [value] });
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  fireEvent.click(screen.getByRole("button", { name: "100%" }));
+  fireEvent.click(screen.getByRole("button", { name: "Select/Edit" }));
+  const svg = screen.getByLabelText("Measurements for page 1"),
+    host = screen.getByRole("region", { name: "PDF pages" });
+  fireEvent.pointerDown(svg.querySelector("[data-measurement-id]")!, {
+    button: 0,
+    pointerId: 7,
+    ...measurementPoint(1, 100, 200),
+  });
+  fireEvent.pointerUp(svg, { pointerId: 7, ...measurementPoint(1, 100, 200) });
+  const before = history.present;
+  fireEvent.pointerDown(svg.querySelector('[data-measurement-vertex="1"]')!, {
+    button: 0,
+    pointerId: 7,
+    ...measurementPoint(1, 200, 200),
+  });
+  fireEvent.pointerMove(svg, {
+    buttons: 1,
+    pointerId: 7,
+    ...measurementPoint(1, 250, 250),
+  });
+  expect(history.present).toBe(before);
+  fireEvent.pointerUp(svg, { pointerId: 7, ...measurementPoint(1, 250, 250) });
+  expect(history.present.measurements![0].points[1]).toEqual({
+    x: 250,
+    y: 250,
+  });
+  expect(history.undoLabel).toBe("Draw/edit measurement");
+  fireEvent.change(screen.getByLabelText("Measurement text size"), {
+    target: { value: "24" },
+  });
+  act(() => history.cancelSnapshotDrafts());
+  expect(
+    (screen.getByLabelText("Measurement text size") as HTMLInputElement).value,
+  ).toBe("12");
+  expect(
+    screen
+      .getByRole("button", { name: "Apply appearance" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
+  const edited = history.present;
+  fireEvent.pointerDown(svg.querySelector('[data-measurement-vertex="1"]')!, {
+    button: 0,
+    pointerId: 7,
+    ...measurementPoint(1, 250, 250),
+  });
+  fireEvent.pointerMove(svg, {
+    buttons: 1,
+    pointerId: 7,
+    ...measurementPoint(1, 300, 300),
+  });
+  act(() => history.cancelSnapshotDrafts());
+  fireEvent.pointerUp(svg, { pointerId: 7, ...measurementPoint(1, 300, 300) });
+  expect(history.present).toBe(edited);
+  fireEvent.pointerDown(screen.getByLabelText("PDF page 1"), { button: 0 });
+  expect(screen.queryByLabelText("Measurement properties")).toBeNull();
+  fireEvent.keyDown(host, { key: "ArrowRight" });
+  expect(history.present).toBe(edited);
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(history.present).toBe(before);
+});
+
 it("adds and removes canvas marks with Shift-click, then clears the group on a result jump or background click", () => {
   vi.spyOn(SVGElement.prototype, "getBoundingClientRect").mockImplementation(
     function (this: SVGElement) {

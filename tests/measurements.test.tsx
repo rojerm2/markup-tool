@@ -9,6 +9,8 @@ import {
   pasteMarkups,
   moveMarkups,
   deleteMarkups,
+  selectedObjects,
+  selectionBounds,
 } from "../src/services/bulkEditing";
 import { historyChangeRegions } from "../src/services/historyFeedback";
 import type { PageViewport } from "../src/services/coordinates";
@@ -24,6 +26,75 @@ import {
   type Measurement,
   type PageCalibration,
 } from "../src/services/measurements";
+
+it("keeps wide measurement labels inside page bounds after movement and paste with a different destination scale", () => {
+  const viewport = {
+    width: 600,
+    height: 800,
+    convertToViewportPoint: (x: number, y: number) => [x, 800 - y],
+    convertToPdfPoint: (x: number, y: number) => [x, 800 - y],
+  } as unknown as PageViewport;
+  const value: Measurement = {
+      ...area,
+      id: "short",
+      type: "length",
+      points: [
+        { x: 295, y: 400 },
+        { x: 305, y: 400 },
+      ],
+      fontSize: 20,
+    },
+    session = {
+      ...emptySession,
+      measurements: [value],
+      calibrations: [calibration],
+    },
+    moved = sessionReducer(
+      session,
+      moveMarkups(session, [value.id], 1000, 0, () => viewport),
+    ),
+    movedBounds = selectionBounds(
+      selectedObjects(moved, [value.id]),
+      [],
+      viewport,
+      moved.calibrations,
+    );
+  expect(movedBounds.right).toBeCloseTo(600);
+  const pasted = pasteMarkups(
+      session,
+      copyMarkups(session, [value.id], viewport),
+      2,
+      viewport,
+      { x: 595, y: 400 },
+      () => "copy",
+    ),
+    next = sessionReducer(session, pasted.action),
+    bounds = selectionBounds(
+      selectedObjects(next, pasted.ids),
+      [],
+      viewport,
+      next.calibrations,
+    );
+  expect(bounds.right).toBeCloseTo(600);
+  expect(bounds.left).toBeGreaterThanOrEqual(0);
+  expect(measurementLabel(next.measurements![1])).toContain("uncalibrated");
+  const history = new SessionHistory(session);
+  expect(history.apply(pasted.action)).toBe(true);
+  expect(history.present.measurements).toHaveLength(2);
+  history.traverse("undo");
+  expect(history.present).toBe(session);
+  const tooWide = { ...session, measurements: [{ ...value, fontSize: 200 }] };
+  expect(() =>
+    pasteMarkups(
+      tooWide,
+      copyMarkups(tooWide, [value.id], viewport),
+      2,
+      viewport,
+      { x: 300, y: 400 },
+      () => "copy",
+    ),
+  ).toThrow(/labels are larger/);
+});
 
 const calibration: PageCalibration = {
   page: 1,

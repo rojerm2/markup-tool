@@ -1,4 +1,13 @@
-import type { Point } from "./coordinates";
+import {
+  pdfToClient,
+  pdfWidthToViewport,
+  clientToPdf,
+  type Point,
+  type PageRect,
+  type PageViewport,
+} from "./coordinates";
+import { outlineContains, type PathCommand } from "./highlightGeometry";
+import { textWidth } from "./pageLegend";
 
 export const MEASUREMENT_UNITS = ["mm", "cm", "m", "in", "ft", "yd"] as const;
 export type MeasurementUnit = (typeof MEASUREMENT_UNITS)[number];
@@ -250,4 +259,63 @@ export function measurementAnchor(value: Measurement): Point {
         Math.max(...points.map((p) => p.y))) /
       2,
   };
+}
+
+export function measurementPath(value: Measurement): PathCommand[] {
+  return [
+    ...value.points.map((p, i) => ({
+      op: i ? ("L" as const) : ("M" as const),
+      points: [p],
+    })),
+    ...(value.type === "length" ? [] : [{ op: "Z" as const, points: [] }]),
+  ];
+}
+
+export function measurementTextLayout(
+  value: Measurement,
+  calibration?: PageCalibration,
+) {
+  const text = measurementLabel(value, calibration),
+    width = textWidth(text, value.fontSize),
+    center = measurementAnchor(value);
+  // PDF-space box has a top edge and a downward local text axis, matching note layout.
+  return {
+    text,
+    x: center.x - width / 2 - 3,
+    y: center.y + value.fontSize * 0.7 + 3,
+    width: width + 6,
+    height: value.fontSize * 1.4 + 6,
+    baseline: 3 + value.fontSize,
+  };
+}
+
+export function pickMeasurement(
+  values: Measurement[],
+  point: Point,
+  rect: PageRect,
+  viewport: PageViewport,
+  calibration?: PageCalibration,
+): Measurement | null {
+  const p = clientToPdf(point, rect, viewport),
+    scale = (pdfWidthToViewport(1, viewport) * rect.width) / viewport.width;
+  return (
+    [...values].reverse().find((m) => {
+      const box = measurementTextLayout(m, calibration);
+      return (
+        (p.x >= box.x &&
+          p.x <= box.x + box.width &&
+          p.y <= box.y &&
+          p.y >= box.y - box.height) ||
+        outlineContains(
+          measurementPath(m).map((c) => ({
+            ...c,
+            points: c.points.map((p) => pdfToClient(p, rect, viewport)),
+          })),
+          point,
+          (m.width * scale) / 2 + 5,
+          m.type === "area",
+        )
+      );
+    }) ?? null
+  );
 }

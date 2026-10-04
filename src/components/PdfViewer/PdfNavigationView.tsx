@@ -74,6 +74,15 @@ import {
   type MarkupClipboard,
 } from "../../services/bulkEditing";
 import SelectionOverlay from "../Annotations/SelectionOverlay";
+import MeasurementOverlay, {
+  type MeasurementTool,
+  type MeasurementStyle,
+} from "../Annotations/MeasurementOverlay";
+import MeasurementControls from "../Annotations/MeasurementControls";
+import {
+  pickMeasurement,
+  type PageCalibration,
+} from "../../services/measurements";
 
 const GUTTER = 32;
 const LABEL_HEIGHT = 28;
@@ -167,6 +176,7 @@ export default function PdfNavigationView({
       setSelectedNote(null);
       setSelectedPointer(null);
       setSelectedShape(null);
+      setSelectedMeasurement(null);
       setSelectedKey(null);
       setPlacing(false);
       setSelectedId(null);
@@ -181,25 +191,96 @@ export default function PdfNavigationView({
   const [placing, setPlacing] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [tool, setToolState] = useState<
-    "pan" | "highlight" | "edit" | "text" | "arrow" | ShapeKind
+    | "pan"
+    | "highlight"
+    | "edit"
+    | "text"
+    | "arrow"
+    | ShapeKind
+    | MeasurementTool
   >("highlight");
   const [selectedNote, setSelectedNote] = useState<string | null>(null);
   const [selectedPointer, setSelectedPointer] = useState<string | null>(null);
   const [editingNote, setEditingNote] = useState<TextNote | null>(null);
   const [pointerPlacement, setPointerPlacement] = useState<string | null>(null);
   const [selectedShape, setSelectedShape] = useState<string | null>(null);
+  const [selectedMeasurement, setSelectedMeasurement] = useState<string | null>(
+    null,
+  );
+  const [measurementStyle, setMeasurementStyle] = useState<MeasurementStyle>({
+    color: "#0284c7",
+    width: 2,
+    fontSize: 12,
+  });
+  const currentMeasurement = session.measurements?.find(
+    (m) => m.id === selectedMeasurement,
+  );
+  const [calibrationCandidate, setCalibrationCandidate] = useState<
+    | {
+        page: number;
+        a: Point;
+        b: Point;
+        generation: number;
+        before: PageCalibration | undefined;
+      }
+    | undefined
+  >(undefined);
+  useEffect(() => {
+    const cancel = () => setCalibrationCandidate(undefined),
+      a = history.subscribeCancellation(cancel),
+      b = history.subscribeSnapshotCancellation(cancel);
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape" || (isSpaceKey(e) && !isEditingControl(e.target)))
+        cancel();
+    };
+    const scroll = (e: Event) => {
+      if (e.target instanceof Element && e.target.matches(".pdf-scroll"))
+        cancel();
+    };
+    window.addEventListener("scroll", scroll, true);
+    window.addEventListener("keydown", key);
+    return () => {
+      a();
+      b();
+      window.removeEventListener("scroll", scroll, true);
+      window.removeEventListener("keydown", key);
+    };
+  }, [history]);
   const [shapeStyle, setShapeStyle] =
     useState<Pick<Shape, "color" | "width" | "fill">>(SHAPE_DEFAULTS);
   const currentShape = session.shapes?.find((s) => s.id === selectedShape);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  useEffect(() => {
+    if (
+      tool !== "edit" ||
+      selectedId ||
+      selectedShape ||
+      selectedNote ||
+      selectedKey ||
+      !currentMeasurement
+    )
+      setSelectedMeasurement(null);
+    if (tool !== "measure-calibrate") setCalibrationCandidate(undefined);
+  }, [
+    tool,
+    selectedId,
+    selectedShape,
+    selectedNote,
+    selectedKey,
+    currentMeasurement,
+  ]);
   const [multiSelection, setMultiSelection] = useState<string[]>([]);
   const [clipboard, setClipboard] = useState<MarkupClipboard | null>(null);
   const [bulkMessage, setBulkMessage] = useState<string | null>(null);
   const selectionIds = multiSelection.length
     ? multiSelection
-    : [selectedId ?? selectedShape ?? selectedNote ?? selectedKey].filter(
-        (id): id is string => !!id,
-      );
+    : [
+        selectedId ??
+          selectedShape ??
+          selectedNote ??
+          selectedKey ??
+          selectedMeasurement,
+      ].filter((id): id is string => !!id);
   const groupObjects = useMemo(() => {
     if (multiSelection.length < 2) return [];
     try {
@@ -211,11 +292,14 @@ export default function PdfNavigationView({
   const groupLimits = useMemo(
     () =>
       groupObjects.length
-        ? movementLimits(groupObjects, session.legends, (p) =>
-            pages[p - 1].getViewport({ scale: 1 }),
+        ? movementLimits(
+            groupObjects,
+            session.legends,
+            (p) => pages[p - 1].getViewport({ scale: 1 }),
+            session.calibrations,
           )
         : { minX: 0, maxX: 0, minY: 0, maxY: 0 },
-    [groupObjects, session.legends, pages],
+    [groupObjects, session.legends, session.calibrations, pages],
   );
   useEffect(() => {
     if (multiSelection.length && !groupObjects.length) setMultiSelection([]);
@@ -225,13 +309,18 @@ export default function PdfNavigationView({
   }, [tool]);
   useEffect(() => {
     if (
-      [selectedId, selectedShape, selectedNote, selectedKey].some(
-        (id) => id && (!visible(id) || lockedObject(id)),
-      )
+      [
+        selectedId,
+        selectedShape,
+        selectedNote,
+        selectedKey,
+        selectedMeasurement,
+      ].some((id) => id && (!visible(id) || lockedObject(id)))
     ) {
       history.invalidate();
       setSelectedId(null);
       setSelectedShape(null);
+      setSelectedMeasurement(null);
       setSelectedNote(null);
       setSelectedPointer(null);
       setSelectedKey(null);
@@ -490,6 +579,9 @@ export default function PdfNavigationView({
   const host = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [current, setCurrent] = useState(documentNavigation.view.page);
+  const currentCalibration = session.calibrations?.find(
+    (c) => c.page === current,
+  );
   useEffect(() => {
     if (
       selectedId &&
@@ -502,6 +594,11 @@ export default function PdfNavigationView({
   );
   const [mode, setMode] = useState<ZoomMode>(documentNavigation.view.mode);
   const [zoom, setZoom] = useState(documentNavigation.view.zoom);
+  useEffect(() => setCalibrationCandidate(undefined), [mode, zoom, disabled]);
+  useEffect(() => {
+    if (calibrationCandidate && calibrationCandidate.page !== current)
+      setCalibrationCandidate(undefined);
+  }, [current]);
   const initialView = useRef<DocumentNavigation["view"] | null>(
     documentNavigation.view,
   );
@@ -540,6 +637,7 @@ export default function PdfNavigationView({
     setBulkMessage(null);
     setSelectedId(null);
     setSelectedShape(null);
+    setSelectedMeasurement(null);
     setSelectedNote(null);
     setSelectedKey(null);
     setSelectedPointer(null);
@@ -552,6 +650,7 @@ export default function PdfNavigationView({
       if (object.kind === "highlight") setSelectedId(ids[0]);
       else if (object.kind === "shape") setSelectedShape(ids[0]);
       else if (object.kind === "note") setSelectedNote(ids[0]);
+      else if (object.kind === "measurement") setSelectedMeasurement(ids[0]);
       else setSelectedKey(ids[0]);
     }
     setTool("edit");
@@ -573,6 +672,26 @@ export default function PdfNavigationView({
       setBulkMessage(error instanceof Error ? error.message : String(error));
       playActionSound("error");
     }
+  }
+
+  function chooseMeasurement(next: MeasurementTool, page = current) {
+    selectGroup([]);
+    if (page !== current) navigate(page);
+    setTool(next);
+    setPanelOpen(window.innerWidth > 800);
+    host.current?.focus({ preventScroll: true });
+    const calibration =
+      page === current
+        ? currentCalibration
+        : session.calibrations?.find((c) => c.page === page);
+    if (next === "measure-calibrate" && calibration)
+      setCalibrationCandidate({
+        page,
+        a: calibration.a,
+        b: calibration.b,
+        before: calibration,
+        generation: history.generation,
+      });
   }
 
   function copySelection() {
@@ -679,6 +798,7 @@ export default function PdfNavigationView({
             ...(session.shapes ?? []),
             ...(session.notes ?? []),
             ...(session.pageLegends ?? []),
+            ...(session.measurements ?? []),
           ]
             .filter(
               (o) => o.page === current && visible(o.id) && !lockedObject(o.id),
@@ -686,14 +806,17 @@ export default function PdfNavigationView({
             .map((o) => o.id),
         );
     else if (
-      multiSelection.length &&
+      (multiSelection.length || selectedMeasurement) &&
       (e.key === "Delete" || e.key === "Backspace")
     )
       action = deleteSelection;
-    else if (multiSelection.length && e.key === "Escape")
+    else if (
+      (multiSelection.length || selectedMeasurement) &&
+      e.key === "Escape"
+    )
       action = () => selectGroup([]);
     else if (
-      multiSelection.length &&
+      (multiSelection.length || selectedMeasurement) &&
       !control &&
       !e.altKey &&
       host.current?.contains(e.target)
@@ -948,6 +1071,7 @@ export default function PdfNavigationView({
       setMultiSelection([]);
       setSelectedId(null);
       setSelectedShape(null);
+      setSelectedMeasurement(null);
       setSelectedNote(null);
       setSelectedKey(null);
       setSelectedPointer(null);
@@ -1053,6 +1177,7 @@ export default function PdfNavigationView({
       row.type === "text" || row.type === "arrow" ? row.id : null,
     );
     setSelectedShape(row.type === "shape" ? row.id : null);
+    setSelectedMeasurement(row.type === "measurement" ? row.id : null);
     setSelectedKey(row.type === "legend" ? row.id : null);
     setSelectedId(row.type === "highlight" ? row.id : null);
     setTool("edit");
@@ -1253,15 +1378,25 @@ export default function PdfNavigationView({
       ref={root}
       className="pdf-navigation"
       onContextMenu={(e) => {
-        let id = selectedNote ?? selectedKey ?? selectedShape ?? selectedId;
+        let id =
+          selectedNote ??
+          selectedKey ??
+          selectedShape ??
+          selectedId ??
+          selectedMeasurement;
         let removeType:
-          "remove-note" | "remove-key" | "remove-shape" | "remove-stroke" =
-          selectedNote
-            ? "remove-note"
-            : selectedKey
-              ? "remove-key"
-              : selectedShape
-                ? "remove-shape"
+          | "remove-note"
+          | "remove-key"
+          | "remove-shape"
+          | "remove-stroke"
+          | "remove-measurement" = selectedNote
+          ? "remove-note"
+          : selectedKey
+            ? "remove-key"
+            : selectedShape
+              ? "remove-shape"
+              : selectedMeasurement
+                ? "remove-measurement"
                 : "remove-stroke";
         const node =
             e.target instanceof Element
@@ -1329,22 +1464,42 @@ export default function PdfNavigationView({
             rect,
             viewport,
           );
-          id = key?.id ?? note?.id ?? shape?.id ?? stroke?.id ?? null;
-          removeType = key
-            ? "remove-key"
-            : note
-              ? "remove-note"
-              : shape
-                ? "remove-shape"
-                : "remove-stroke";
+          const measure = pickMeasurement(
+            (session.measurements ?? []).filter(
+              (m) => m.page === page && visible(m.id) && !lockedObject(m.id),
+            ),
+            client,
+            rect,
+            viewport,
+            session.calibrations?.find((c) => c.page === page),
+          );
+          id =
+            measure?.id ??
+            key?.id ??
+            note?.id ??
+            shape?.id ??
+            stroke?.id ??
+            null;
+          removeType = measure
+            ? "remove-measurement"
+            : key
+              ? "remove-key"
+              : note
+                ? "remove-note"
+                : shape
+                  ? "remove-shape"
+                  : "remove-stroke";
           history.invalidate();
           setMultiSelection([]);
           setPlacing(false);
-          setSelectedKey(key?.id ?? null);
-          setSelectedNote(key ? null : (note?.id ?? null));
+          setSelectedMeasurement(measure?.id ?? null);
+          setSelectedKey(measure ? null : (key?.id ?? null));
+          setSelectedNote(measure || key ? null : (note?.id ?? null));
           setSelectedPointer(null);
-          setSelectedShape(key || note ? null : (shape?.id ?? null));
-          setSelectedId(key || note || shape ? null : (stroke?.id ?? null));
+          setSelectedShape(measure || key || note ? null : (shape?.id ?? null));
+          setSelectedId(
+            measure || key || note || shape ? null : (stroke?.id ?? null),
+          );
           if (id) setTool("edit");
         }
         openMenu(e, [
@@ -1464,6 +1619,23 @@ export default function PdfNavigationView({
             <option value="rectangle">Rectangle</option>
             <option value="ellipse">Ellipse</option>
             <option value="line">Line</option>
+          </select>
+        </label>
+        <label className="shape-tool-label">
+          Measure{" "}
+          <select
+            aria-label="Measurement tool"
+            value={tool.startsWith("measure-") ? tool : ""}
+            onChange={(e) => {
+              if (e.target.value)
+                chooseMeasurement(e.target.value as MeasurementTool);
+            }}
+          >
+            <option value="">Choose tool</option>
+            <option value="measure-length">Length</option>
+            <option value="measure-area">Area</option>
+            <option value="measure-perimeter">Perimeter</option>
+            <option value="measure-calibrate">Calibrate page</option>
           </select>
         </label>
         <button
@@ -1688,33 +1860,100 @@ export default function PdfNavigationView({
               ? "Move around the page"
               : tool === "edit"
                 ? "Select an annotation to edit"
-                : tool.charAt(0).toUpperCase() + tool.slice(1)}
+                : tool.startsWith("measure-")
+                  ? `Measure ${tool.slice(8)}`
+                  : tool.charAt(0).toUpperCase() + tool.slice(1)}
             {tool === "highlight"
               ? ` · ${session.legends.find((l) => l.id === activeLegendId)?.name ?? COLORS.find((c) => c.value === drawing.color)?.name ?? "Custom color"}`
               : ""}
           </p>
           <div className="annotation-tools">
-            {(tool === "edit" || tool === "text" || tool === "arrow") && (
-              <NoteControls
-                notes={session.notes ?? []}
-                selected={selectedNote}
-                pointer={selectedPointer}
-                onSelect={selectNote}
-                editing={editingNote}
-                onEdit={setEditingNote}
-                onClose={() => setEditingNote(null)}
-                onPointer={() => {
-                  history.invalidate();
-                  setPointerPlacement(selectedNote);
-                  if (window.innerWidth <= 800) setPanelOpen(false);
-                }}
-                placing={!!pointerPlacement}
+            {(tool.startsWith("measure-") || currentMeasurement) && (
+              <MeasurementControls
+                page={currentMeasurement?.page ?? current}
+                tool={
+                  tool.startsWith("measure-")
+                    ? (tool as MeasurementTool)
+                    : "edit"
+                }
+                calibration={session.calibrations?.find(
+                  (c) => c.page === (currentMeasurement?.page ?? current),
+                )}
+                candidate={calibrationCandidate}
+                style={measurementStyle}
                 history={history}
-                dispatch={dispatch}
+                revision={viewRevision}
+                selected={currentMeasurement}
                 disabled={disabled}
-                revision={`${viewRevision}:${mode}:${zoom}:${tool}`}
+                lockedPage={
+                  !!session.measurements?.some(
+                    (m) =>
+                      m.page === (currentMeasurement?.page ?? current) &&
+                      lockedObject(m.id),
+                  )
+                }
+                onCalibrate={() =>
+                  chooseMeasurement(
+                    "measure-calibrate",
+                    currentMeasurement?.page ?? current,
+                  )
+                }
+                onCancel={() => chooseMeasurement("measure-length")}
+                onApply={(calibration) => {
+                  const candidate = calibrationCandidate;
+                  if (!candidate || candidate.page !== calibration.page) return;
+                  const before = history.present;
+                  dispatch(
+                    {
+                      type: "calibrate-page",
+                      page: calibration.page,
+                      calibration,
+                      before: candidate.before,
+                    },
+                    candidate.generation,
+                  );
+                  if (history.present === before) {
+                    setBulkMessage(
+                      "The scale could not be applied. Check locked measurements or draw a new reference.",
+                    );
+                    return;
+                  }
+                  setCalibrationCandidate(undefined);
+                  setTool("measure-length");
+                }}
+                onStyle={setMeasurementStyle}
+                onEdit={(measurement) => {
+                  if (currentMeasurement)
+                    dispatch({
+                      type: "put-measurement",
+                      before: currentMeasurement,
+                      measurement,
+                    });
+                }}
               />
             )}
+            {!currentMeasurement &&
+              (tool === "edit" || tool === "text" || tool === "arrow") && (
+                <NoteControls
+                  notes={session.notes ?? []}
+                  selected={selectedNote}
+                  pointer={selectedPointer}
+                  onSelect={selectNote}
+                  editing={editingNote}
+                  onEdit={setEditingNote}
+                  onClose={() => setEditingNote(null)}
+                  onPointer={() => {
+                    history.invalidate();
+                    setPointerPlacement(selectedNote);
+                    if (window.innerWidth <= 800) setPanelOpen(false);
+                  }}
+                  placing={!!pointerPlacement}
+                  history={history}
+                  dispatch={dispatch}
+                  disabled={disabled}
+                  revision={`${viewRevision}:${mode}:${zoom}:${tool}`}
+                />
+              )}
             {tool === "highlight" ? (
               <DrawingControls
                 value={drawing}
@@ -1723,7 +1962,10 @@ export default function PdfNavigationView({
                   dispatch({ type: "drawing", drawing, manual })
                 }
               />
-            ) : tool === "edit" && !currentShape && !selectedNote ? (
+            ) : tool === "edit" &&
+              !currentShape &&
+              !selectedNote &&
+              !currentMeasurement ? (
               <EditingControls
                 session={session}
                 history={history}
@@ -1732,7 +1974,7 @@ export default function PdfNavigationView({
                 dispatch={dispatch}
               />
             ) : null}
-            {((tool === "edit" && !selectedNote) ||
+            {((tool === "edit" && !selectedNote && !currentMeasurement) ||
               ["rectangle", "ellipse", "line"].includes(tool)) && (
               <ShapeControls
                 showProperties={
@@ -1849,6 +2091,7 @@ export default function PdfNavigationView({
               setSelectedId(null);
               setSelectedShape(null);
               setSelectedNote(null);
+              setSelectedMeasurement(null);
               setSelectedKey(null);
               setSelectedPointer(null);
             }
@@ -1892,6 +2135,7 @@ export default function PdfNavigationView({
                         setMultiSelection([]);
                         setSelectedNote(null);
                         setSelectedShape(null);
+                        setSelectedMeasurement(null);
                         setSelectedId(id);
                         setSelectedKey(null);
                       }}
@@ -1928,9 +2172,12 @@ export default function PdfNavigationView({
                         (s) => s.page === page.pageNumber && visible(s.id),
                       )}
                       tool={
-                        tool === "text" || tool === "arrow" || tool === "pan"
+                        tool === "text" ||
+                        tool === "arrow" ||
+                        tool === "pan" ||
+                        tool.startsWith("measure-")
                           ? "highlight"
-                          : tool
+                          : (tool as "highlight" | "edit" | ShapeKind)
                       }
                       style={{
                         ...shapeStyle,
@@ -2009,6 +2256,63 @@ export default function PdfNavigationView({
                       editing={tool === "edit" && !pointerPlacement}
                       disabled={disabled || !!editingNote || !!pointerPlacement}
                       revision={viewRevision}
+                    />
+                    <MeasurementOverlay
+                      page={page.pageNumber}
+                      viewport={viewport}
+                      baseViewport={page.getViewport({ scale: 1 })}
+                      session={session}
+                      values={(session.measurements ?? []).filter(
+                        (m) => m.page === page.pageNumber && visible(m.id),
+                      )}
+                      calibration={session.calibrations?.find(
+                        (c) => c.page === page.pageNumber,
+                      )}
+                      reference={
+                        calibrationCandidate?.page === page.pageNumber
+                          ? calibrationCandidate
+                          : undefined
+                      }
+                      tool={
+                        tool.startsWith("measure-")
+                          ? (tool as MeasurementTool)
+                          : tool === "edit"
+                            ? "edit"
+                            : null
+                      }
+                      selected={selectedMeasurement}
+                      style={measurementStyle}
+                      history={history}
+                      revision={viewRevision}
+                      disabled={
+                        disabled ||
+                        placing ||
+                        !!editingNote ||
+                        !!pointerPlacement ||
+                        pan.className.includes("can-pan")
+                      }
+                      locked={lockedObject}
+                      onSelect={(id, additive) => {
+                        if (additive) toggleSelection(id);
+                        else selectGroup([id]);
+                      }}
+                      onScale={(page, a, b, generation) => {
+                        if (history.generation !== generation) return;
+                        setCurrent(page);
+                        setPageInput(String(page));
+                        setCalibrationCandidate({
+                          page,
+                          a,
+                          b,
+                          generation,
+                          before: session.calibrations?.find(
+                            (c) => c.page === page,
+                          ),
+                        });
+                        setPanelOpen(true);
+                      }}
+                      dispatch={dispatch}
+                      onError={setBulkMessage}
                     />
                     {strokePreview && page.pageNumber === current && (
                       <StrokeSizePreview

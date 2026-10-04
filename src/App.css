@@ -2231,6 +2231,36 @@ summary[aria-disabled="true"] {
 .selection-overlay {
   z-index: 5;
 }
+
+.measurement-overlay {
+  z-index: 4;
+}
+.measurement-controls {
+  display: grid;
+  gap: 10px;
+}
+.measurement-controls p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.measurement-controls label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.measurement-controls form {
+  display: grid;
+  gap: 10px;
+}
+.measurement-controls input[type="number"] {
+  width: 110px;
+}
+.measurement-controls small {
+  color: var(--muted);
+  font-size: 11px;
+}
 .document-list .markup-select {
   flex-shrink: 0;
   align-self: center;

@@ -34,7 +34,7 @@ are saved inside the project, including recovery checkpoints. Adding, changing
 or removing a bookmark creates unsaved project changes. Annotation Undo/Redo
 continues to affect annotations; use the bookmark controls to change bookmarks.
 
-**Markups** lists highlights, shapes, text, arrows and page legends. Search by
+**Markups** lists highlights, shapes, text, arrows, measurements and page legends. Search by
 label, page, type or category, and combine the type/category/current-page filters.
 Click a result to bring it into view and select it for editing. Keyboard focus
 returns to the page so arrow keys move the selected object and Space pans.
@@ -66,6 +66,38 @@ bounds and includes text pointer targets. Escape, Space, view changes, Save and
 Undo cancel unfinished group drags. Locked or hidden categories cannot be
 selected for bulk edits. Hiding and locking a selected category clears its
 selection; copying never unlocks destination categories.
+
+## Measurements
+
+Choose **Measure → Calibrate page**, drag between two points with a known
+real-world distance, then enter the distance and unit in Properties and choose
+**Apply scale**. Dashed reference points stay visible until you apply or cancel.
+Scale belongs to that page; other pages remain uncalibrated. Units include mm,
+cm, m, in, ft and yd. Changing the unit converts the entered reference distance.
+Use **Change page scale** to reuse the reference points or draw a new reference.
+Recalibration updates that page's measurements and is one Undo step. Unlock any
+locked measurements on the page before changing its scale.
+
+**Length** measures a dragged straight line. **Area** and **Perimeter** use a
+closed polygon: click each vertex, then press Enter, double-click, or click the
+first point to finish. Escape, Space, view changes, Save and Undo cancel an
+unfinished drawing. Crossing, overlapping or degenerate polygons are rejected;
+a polygon supports up to 128 vertices, and a project supports 1,000 measurements.
+Without a scale, labels explicitly show **PDF units (uncalibrated)**.
+
+In **Select/Edit**, click a measurement to move it, drag its endpoint/vertex
+handles to change its geometry, or use arrow keys to nudge it. Properties offers
+color, line width (0.01–100 pt) and text size (1–200 pt); **Apply appearance**
+commits the selected object's changes together. Save and view changes cancel
+unapplied appearance drafts. Measurements support category assignment, hide/lock,
+search, multi-selection, duplicate and copy/paste. Pasted measurements use the
+destination page's scale; pasting never copies or replaces a page calibration.
+
+Exported PDFs and print previews include the same vector geometry and labels.
+Labels follow the sheet's orientation on rotated pages. Measurements are
+estimates: verify drawing scales and dimensions against authoritative sources.
+Projects containing measurements or calibrations use schema version 4, which
+older releases reject instead of silently losing measurements.
 
 ## Existing projects
 
@@ -134,7 +166,7 @@ One local run measured default parsing/saving at 7.34 seconds and optimized PDF 
 
 ## Project storage
 
-Portable projects contain an 8-byte `PMARKUP` magic/version marker, a little-endian 32-bit metadata length, a little-endian 64-bit PDF length, project JSON, and the original PDF bytes. Metadata uses version 2 for ordinary annotations and version 3 when category protection or non-highlight category assignments are present. Legacy JSON project versions 1 and 2 can still be read.
+Portable projects contain an 8-byte `PMARKUP` magic/version marker, a little-endian 32-bit metadata length, a little-endian 64-bit PDF length, project JSON, and the original PDF bytes. Metadata uses version 2 for ordinary annotations, version 3 when category protection or non-highlight category assignments are present, and version 4 for measurements or page calibrations. Legacy JSON project versions 1 and 2 can still be read.
 
 The application limits annotation metadata to 16 MiB and the included PDF to 256 MiB. It checks the included PDF's size and SHA-256 identity before opening it, extracts only to an application-generated temporary file, and saves atomically using a temporary sibling file. Embedded filenames do not authorize access to other local files.
 
