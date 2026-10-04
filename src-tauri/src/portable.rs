@@ -17,7 +17,10 @@ const MAX_PDF: u64 = 256 * 1024 * 1024;
 pub fn envelope(text: &str) -> Result<serde_json::Value, String> {
     let value: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
     if value["format"] != "pdf-markup-project"
-        || (value["version"] != 1 && value["version"] != 2 && value["version"] != 3)
+        || (value["version"] != 1
+            && value["version"] != 2
+            && value["version"] != 3
+            && value["version"] != 4)
         || !value["source"].is_object()
     {
         return Err("Invalid project envelope".into());
@@ -161,6 +164,12 @@ mod tests {
         let restored = envelope(&metadata).unwrap();
         assert_eq!(restored["version"], 3);
         assert_eq!(restored["session"]["legends"][0]["locked"], true);
+        assert_eq!(bytes.unwrap(), pdf);
+        value["version"] = 4.into();
+        value["session"]["calibrations"] = serde_json::json!([{"page":1,"distance":10,"unit":"m"}]);
+        std::fs::write(&path, encode(&value.to_string(), pdf).unwrap()).unwrap();
+        let (metadata, bytes) = read(&path, true).unwrap();
+        assert_eq!(envelope(&metadata).unwrap()["version"], 4);
         assert_eq!(bytes.unwrap(), pdf);
         value["version"] = 99.into();
         assert!(encode(&value.to_string(), pdf).is_err());

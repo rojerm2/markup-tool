@@ -17,6 +17,7 @@ function index(session: AnnotationSession) {
       ...(session.shapes ?? []),
       ...(session.notes ?? []),
       ...(session.pageLegends ?? []),
+      ...(session.measurements ?? []),
     ].map((s) => s.id),
   );
   flags = new Map(session.legends.map((l) => [l.id, l]));

@@ -8,6 +8,7 @@ import { sessionReducer } from "./annotationSession";
 import { serializeProject } from "./projectFormat";
 import type { Highlight } from "../types/annotation";
 import type { Shape } from "./shapes";
+import type { Measurement } from "./measurements";
 import { notePoint, type NoteObject } from "./notes";
 import {
   keyMatrix,
@@ -28,6 +29,7 @@ export const MAX_SELECTION = 500;
 export type SelectedObject =
   | { kind: "highlight"; value: Highlight }
   | { kind: "shape"; value: Shape }
+  | { kind: "measurement"; value: Measurement }
   | { kind: "note"; value: NoteObject }
   | { kind: "legend"; value: PageLegend };
 export type MarkupClipboard = {
@@ -54,6 +56,9 @@ export function selectedObjects(
   );
   session.shapes?.forEach((value) =>
     objects.set(value.id, { kind: "shape", value }),
+  );
+  session.measurements?.forEach((value) =>
+    objects.set(value.id, { kind: "measurement", value }),
   );
   session.notes?.forEach((value) =>
     objects.set(value.id, { kind: "note", value }),
@@ -92,6 +97,8 @@ export function selectionBounds(
   for (const o of objects) {
     const v = o.value;
     if (o.kind === "highlight")
+      o.value.points.forEach((p) => include(p, o.value.width / 2));
+    else if (o.kind === "measurement")
       o.value.points.forEach((p) => include(p, o.value.width / 2));
     else if (o.kind === "shape") {
       include(o.value.a, o.value.width / 2);
@@ -212,6 +219,12 @@ export function moveMarkups(
         before: o.value,
         shape: { ...o.value, a: shift(o.value.a), b: shift(o.value.b) },
       };
+    if (o.kind === "measurement")
+      return {
+        type: "put-measurement",
+        before: o.value,
+        measurement: { ...o.value, points: o.value.points.map(shift) },
+      };
     if (o.kind === "legend")
       return {
         type: "put-key",
@@ -250,9 +263,11 @@ export function deleteMarkups(
         ? { type: "remove-stroke", id: o.value.id }
         : o.kind === "shape"
           ? { type: "remove-shape", id: o.value.id }
-          : o.kind === "legend"
-            ? { type: "remove-key", id: o.value.id }
-            : { type: "remove-note", id: o.value.id },
+          : o.kind === "measurement"
+            ? { type: "remove-measurement", id: o.value.id }
+            : o.kind === "legend"
+              ? { type: "remove-key", id: o.value.id }
+              : { type: "remove-note", id: o.value.id },
     ),
   };
 }
@@ -310,6 +325,7 @@ export function pasteMarkups(
         ...(session.shapes ?? []),
         ...(session.notes ?? []),
         ...(session.pageLegends ?? []),
+        ...(session.measurements ?? []),
       ].flatMap((v) => [
         v.id,
         ...("pointers" in v ? v.pointers.map((p) => p.id) : []),
@@ -384,6 +400,18 @@ export function pasteMarkups(
           a: transform(o.value.a),
           b: transform(o.value.b),
           width: o.value.width * ratio,
+        },
+      });
+    else if (o.kind === "measurement")
+      actions.push({
+        type: "put-measurement",
+        measurement: {
+          ...o.value,
+          id,
+          page,
+          points: o.value.points.map(transform),
+          width: o.value.width * ratio,
+          fontSize: o.value.fontSize * ratio,
         },
       });
     else if (o.kind === "note") {

@@ -12,6 +12,9 @@ type Transaction = {
 };
 const labels: Record<SessionAction["type"], string> = {
   bulk: "Edit selection",
+  "calibrate-page": "Calibrate page",
+  "put-measurement": "Draw/edit measurement",
+  "remove-measurement": "Delete measurement",
   "category-settings": "Category visibility/locking",
   "assign-category": "Assign category",
   "put-note": "Create/edit note or arrow",
