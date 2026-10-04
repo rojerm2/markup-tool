@@ -1,5 +1,6 @@
 import { cp, mkdir } from "node:fs/promises";
 import "./third-party-licenses.mjs";
+import "./check-font-license.mjs";
 
 const destination = new URL("../public/pdfjs/", import.meta.url);
 await mkdir(destination, { recursive: true });

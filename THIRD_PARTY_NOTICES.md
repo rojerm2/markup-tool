@@ -14,8 +14,10 @@ their own licenses; the project license does not replace them.
 | Liberation Sans (bundled as LegendSans) | GPL-2.0 with font embedding exception | src/assets/LegendSans.LICENSE               |
 
 The PDF.js distribution copies its license into bundled assets. The font
-license is included in the installed resources. Direct and transitive runtime
-JavaScript licenses are collected into `public/THIRD_PARTY_LICENSES.txt`
+license is included in the installed resources.
+The font's corresponding source archive and build instructions are included in
+`licenses/font-source/`; provenance is documented in `third_party/fonts/README.md`.
+Direct and transitive runtime JavaScript licenses are collected into `public/THIRD_PARTY_LICENSES.txt`
 during the build. Rust component license declarations are available in the
 locked dependency graph (`cargo metadata --locked`) and upstream crates. The
 installer additionally includes collected Rust license texts in `licenses/RUST_LICENSES.txt`.
