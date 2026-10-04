@@ -8,6 +8,7 @@ import {
 import { validShape, MAX_SHAPES, SHAPE_DEFAULTS, type Shape } from "./shapes";
 import { validPageLegend, type PageLegend } from "./pageLegend";
 import type { AnnotationSession } from "./annotationSession";
+import { parseNavigation, type DocumentNavigation } from "./documentNavigation";
 
 export const MAX_PROJECT_BYTES = 16 * 1024 * 1024;
 export type SourceIdentity = {
@@ -22,6 +23,7 @@ export type Project = {
   version: 2;
   source: SourceIdentity;
   session: AnnotationSession;
+  navigation?: DocumentNavigation;
 };
 const fail = (field: string): never => {
   throw new Error(`Invalid project: ${field}.`);
@@ -258,6 +260,9 @@ export function parseProject(text: string): Project {
     format: "pdf-markup-project",
     version: 2,
     source: identity,
+    ...(root.navigation === undefined
+      ? {}
+      : { navigation: parseNavigation(root.navigation, identity.pages) }),
     session: {
       ...(notes.length ? { notes } : {}),
       legends,
@@ -273,12 +278,14 @@ export function parseProject(text: string): Project {
 export function serializeProject(
   source: SourceIdentity,
   session: AnnotationSession,
+  navigation?: DocumentNavigation,
 ): string {
   const text = JSON.stringify({
     format: "pdf-markup-project",
     version: 2,
     source,
     session,
+    ...(navigation ? { navigation } : {}),
   });
   parseProject(text);
   return text;

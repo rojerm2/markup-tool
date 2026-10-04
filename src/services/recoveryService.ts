@@ -5,6 +5,7 @@ import {
   type SourceIdentity,
 } from "./projectFormat";
 import type { AnnotationSession } from "./annotationSession";
+import type { DocumentNavigation } from "./documentNavigation";
 
 export type RecoveryEntry = {
   id: string;
@@ -18,6 +19,7 @@ type Snapshot = {
   projectPath: string | null;
   source: SourceIdentity;
   session: AnnotationSession;
+  navigation?: DocumentNavigation;
 };
 
 export async function listRecovery(): Promise<RecoveryEntry[]> {
@@ -73,7 +75,11 @@ export class RecoveryJournal {
           sourcePath: snapshot.sourcePath,
           projectPath: snapshot.projectPath,
           recoveryId: this.id,
-          text: serializeProject(snapshot.source, snapshot.session),
+          text: serializeProject(
+            snapshot.source,
+            snapshot.session,
+            snapshot.navigation,
+          ),
         });
         this.retryDelay = RECOVERY_DELAY;
         if (!this.disposed && revision === this.revision)
