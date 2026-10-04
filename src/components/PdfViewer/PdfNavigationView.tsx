@@ -7,7 +7,6 @@ import { noteLocal, moveNote, type TextNote } from "../../services/notes";
 import ShapeOverlay from "../Annotations/ShapeOverlay";
 import ShapeControls from "../Annotations/ShapeControls";
 import {
-  SHAPE_DEFAULTS,
   pickShape,
   moveShape,
   type Shape,
@@ -19,7 +18,7 @@ import PageLegendControls from "../Annotations/PageLegendControls";
 import { keyMatrix, layoutLegend } from "../../services/pageLegend";
 import { pickHighlight } from "../../services/annotationEditing";
 import { viewportToPdf } from "../../services/coordinates";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PDFPageProxy } from "pdfjs-dist";
 import {
   clampZoom,
@@ -45,7 +44,10 @@ import {
   type SessionAction,
 } from "../../services/annotationSession";
 
-import { SessionHistory } from "../../services/sessionHistory";
+import { SessionHistory, sameSession } from "../../services/sessionHistory";
+import { DEFAULT_TOOL_STYLES } from "../../services/toolStyles";
+import PresetLibrary from "../Presets/PresetLibrary";
+import { captureSymbol, placeSymbol } from "../../services/presets";
 import {
   historyChangeRegions,
   type ChangeRegion,
@@ -55,6 +57,34 @@ import HistoryChangeOverlay, {
 } from "../Annotations/HistoryChangeOverlay";
 import { playActionSound } from "../../services/actionSounds";
 import { isSpaceKey } from "../../services/canvasFocus";
+import DocumentPanel from "./DocumentPanel";
+import {
+  defaultNavigation,
+  type DocumentNavigation,
+} from "../../services/documentNavigation";
+import type { MarkupRow } from "../../services/markupList";
+import { objectLocked, objectVisible } from "../../services/categoryPolicy";
+import {
+  copyMarkups,
+  pasteMarkups,
+  duplicateMarkups,
+  deleteMarkups,
+  moveMarkups,
+  movementLimits,
+  selectedObjects,
+  MAX_SELECTION,
+  type MarkupClipboard,
+} from "../../services/bulkEditing";
+import SelectionOverlay from "../Annotations/SelectionOverlay";
+import MeasurementOverlay, {
+  type MeasurementTool,
+  type MeasurementStyle,
+} from "../Annotations/MeasurementOverlay";
+import MeasurementControls from "../Annotations/MeasurementControls";
+import {
+  pickMeasurement,
+  type PageCalibration,
+} from "../../services/measurements";
 
 const GUTTER = 32;
 const LABEL_HEIGHT = 28;
@@ -68,6 +98,8 @@ export default function PdfNavigationView({
   disabled = false,
   largerControls = false,
   fileActions = [],
+  navigation,
+  onNavigation,
 }: {
   fileActions?: MenuItem[];
   pages: PDFPageProxy[];
@@ -77,13 +109,30 @@ export default function PdfNavigationView({
   onHistory?: (direction: "undo" | "redo") => boolean;
   disabled?: boolean;
   largerControls?: boolean;
+  navigation?: DocumentNavigation;
+  onNavigation?: (navigation: DocumentNavigation) => void;
 }) {
+  const [localNavigation, setLocalNavigation] = useState(
+    navigation ?? defaultNavigation,
+  );
+  const documentNavigation = navigation ?? localNavigation;
+  const navigationCallback = useRef(onNavigation);
+  navigationCallback.current = onNavigation;
+  const [documentOpen, setDocumentOpen] = useState(false);
+  const [presetsOpen, setPresetsOpen] = useState(false);
+  const documentButton = useRef<HTMLButtonElement>(null);
   const [local] = useState(
     () => new SessionHistory(controlled ?? emptySession),
   );
   const [, refresh] = useState(0);
   const history = suppliedHistory ?? local;
   const session = controlled ?? history.present;
+  const visible = (id: string) => objectVisible(session, id);
+  const lockedObject = (id: string) => objectLocked(session, id);
+  const workspaceSession = {
+    ...session,
+    pageLegends: session.pageLegends?.filter((k) => visible(k.id)),
+  };
   const [historyFeedback, setHistoryFeedback] = useState<{
     id: number;
     message: string;
@@ -125,9 +174,12 @@ export default function PdfNavigationView({
         message: `${direction === "undo" ? "Undid" : "Redid"} ${label}${affected.length ? ` · ${affected.length === 1 ? `Page ${affected[0]}` : `${affected.length} pages`}` : ""}`,
       });
       playActionSound(direction);
+      setMultiSelection([]);
+      setBulkMessage(null);
       setSelectedNote(null);
       setSelectedPointer(null);
       setSelectedShape(null);
+      setSelectedMeasurement(null);
       setSelectedKey(null);
       setPlacing(false);
       setSelectedId(null);
@@ -142,17 +194,149 @@ export default function PdfNavigationView({
   const [placing, setPlacing] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [tool, setToolState] = useState<
-    "pan" | "highlight" | "edit" | "text" | "arrow" | ShapeKind
+    | "pan"
+    | "highlight"
+    | "edit"
+    | "text"
+    | "arrow"
+    | ShapeKind
+    | MeasurementTool
   >("highlight");
   const [selectedNote, setSelectedNote] = useState<string | null>(null);
   const [selectedPointer, setSelectedPointer] = useState<string | null>(null);
   const [editingNote, setEditingNote] = useState<TextNote | null>(null);
   const [pointerPlacement, setPointerPlacement] = useState<string | null>(null);
   const [selectedShape, setSelectedShape] = useState<string | null>(null);
-  const [shapeStyle, setShapeStyle] =
-    useState<Pick<Shape, "color" | "width" | "fill">>(SHAPE_DEFAULTS);
+  const [selectedMeasurement, setSelectedMeasurement] = useState<string | null>(
+    null,
+  );
+  const toolStyles = session.toolStyles ?? DEFAULT_TOOL_STYLES,
+    measurementStyle = toolStyles.measurement;
+  const setMeasurementStyle = (measurement: MeasurementStyle) => {
+    const styles = { ...toolStyles, measurement };
+    if (!sameSession(styles, toolStyles))
+      dispatch({ type: "tool-styles", before: session.toolStyles, styles });
+  };
+  const currentMeasurement = session.measurements?.find(
+    (m) => m.id === selectedMeasurement,
+  );
+  const [calibrationCandidate, setCalibrationCandidate] = useState<
+    | {
+        page: number;
+        a: Point;
+        b: Point;
+        generation: number;
+        before: PageCalibration | undefined;
+      }
+    | undefined
+  >(undefined);
+  useEffect(() => {
+    const cancel = () => setCalibrationCandidate(undefined),
+      a = history.subscribeCancellation(cancel),
+      b = history.subscribeSnapshotCancellation(cancel);
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape" || (isSpaceKey(e) && !isEditingControl(e.target)))
+        cancel();
+    };
+    const scroll = (e: Event) => {
+      if (e.target instanceof Element && e.target.matches(".pdf-scroll"))
+        cancel();
+    };
+    window.addEventListener("scroll", scroll, true);
+    window.addEventListener("keydown", key);
+    return () => {
+      a();
+      b();
+      window.removeEventListener("scroll", scroll, true);
+      window.removeEventListener("keydown", key);
+    };
+  }, [history]);
+  const shapeStyle = toolStyles.shape,
+    setShapeStyle = (shape: Pick<Shape, "color" | "width" | "fill">) => {
+      const styles = { ...toolStyles, shape };
+      if (!sameSession(styles, toolStyles))
+        dispatch({ type: "tool-styles", before: session.toolStyles, styles });
+    };
   const currentShape = session.shapes?.find((s) => s.id === selectedShape);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  useEffect(() => {
+    if (
+      tool !== "edit" ||
+      selectedId ||
+      selectedShape ||
+      selectedNote ||
+      selectedKey ||
+      !currentMeasurement
+    )
+      setSelectedMeasurement(null);
+    if (tool !== "measure-calibrate") setCalibrationCandidate(undefined);
+  }, [
+    tool,
+    selectedId,
+    selectedShape,
+    selectedNote,
+    selectedKey,
+    currentMeasurement,
+  ]);
+  const [multiSelection, setMultiSelection] = useState<string[]>([]);
+  const [clipboard, setClipboard] = useState<MarkupClipboard | null>(null);
+  const [bulkMessage, setBulkMessage] = useState<string | null>(null);
+  const selectionIds = multiSelection.length
+    ? multiSelection
+    : [
+        selectedId ??
+          selectedShape ??
+          selectedNote ??
+          selectedKey ??
+          selectedMeasurement,
+      ].filter((id): id is string => !!id);
+  const groupObjects = useMemo(() => {
+    if (multiSelection.length < 2) return [];
+    try {
+      return selectedObjects(session, multiSelection);
+    } catch {
+      return [];
+    }
+  }, [session, multiSelection]);
+  const groupLimits = useMemo(
+    () =>
+      groupObjects.length
+        ? movementLimits(
+            groupObjects,
+            session.legends,
+            (p) => pages[p - 1].getViewport({ scale: 1 }),
+            session.calibrations,
+          )
+        : { minX: 0, maxX: 0, minY: 0, maxY: 0 },
+    [groupObjects, session.legends, session.calibrations, pages],
+  );
+  useEffect(() => {
+    if (multiSelection.length && !groupObjects.length) setMultiSelection([]);
+  }, [groupObjects, multiSelection.length]);
+  useEffect(() => {
+    if (tool !== "edit") setMultiSelection([]);
+  }, [tool]);
+  useEffect(() => {
+    if (
+      [
+        selectedId,
+        selectedShape,
+        selectedNote,
+        selectedKey,
+        selectedMeasurement,
+      ].some((id) => id && (!visible(id) || lockedObject(id)))
+    ) {
+      history.invalidate();
+      setSelectedId(null);
+      setSelectedShape(null);
+      setSelectedMeasurement(null);
+      setSelectedNote(null);
+      setSelectedPointer(null);
+      setSelectedKey(null);
+      setEditingNote(null);
+      setPointerPlacement(null);
+    }
+  }, [session.legends, session.objectCategories]);
   const [roundingPreview, setRoundingPreview] = useState<number | null>(null);
   const roundingStroke =
     tool === "edit" ? annotations.find((s) => s.id === selectedId) : undefined;
@@ -182,9 +366,14 @@ export default function PdfNavigationView({
     if (selectedId && !annotations.some((s) => s.id === selectedId))
       setSelectedId(null);
   }, [annotations, selectedId]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (disabled) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest('dialog, [role="dialog"], [role="alertdialog"]')
+      )
+        return;
       const key = event.key.toLowerCase();
       if (
         !isEditingControl(event.target) &&
@@ -403,7 +592,10 @@ export default function PdfNavigationView({
   }, [disabled, tool, selectedId, dispatch]);
   const host = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
-  const [current, setCurrent] = useState(1);
+  const [current, setCurrent] = useState(documentNavigation.view.page);
+  const currentCalibration = session.calibrations?.find(
+    (c) => c.page === current,
+  );
   useEffect(() => {
     if (
       selectedId &&
@@ -411,9 +603,25 @@ export default function PdfNavigationView({
     )
       setSelectedId(null);
   }, [current]);
-  const [pageInput, setPageInput] = useState("1");
-  const [mode, setMode] = useState<ZoomMode>("page");
-  const [zoom, setZoom] = useState(1);
+  const [pageInput, setPageInput] = useState(
+    String(documentNavigation.view.page),
+  );
+  const [mode, setMode] = useState<ZoomMode>(documentNavigation.view.mode);
+  const [zoom, setZoom] = useState(documentNavigation.view.zoom);
+  useEffect(() => setCalibrationCandidate(undefined), [mode, zoom, disabled]);
+  useEffect(() => {
+    if (calibrationCandidate && calibrationCandidate.page !== current)
+      setCalibrationCandidate(undefined);
+  }, [current]);
+  const initialView = useRef<DocumentNavigation["view"] | null>(
+    documentNavigation.view,
+  );
+  const navigationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  const flushNavigation = useRef<() => void>(() => {});
+  const latestBookmarks = useRef(documentNavigation.bookmarks);
+  latestBookmarks.current = documentNavigation.bookmarks;
   useEffect(() => {
     setViewRevision((v) => v + 1);
   }, [size]);
@@ -433,6 +641,223 @@ export default function PdfNavigationView({
       host.current?.focus({ preventScroll: true });
     }
   }
+
+  function selectGroup(ids: string[]) {
+    if (ids.length > MAX_SELECTION) {
+      setBulkMessage(`Select up to ${MAX_SELECTION} markups at once.`);
+      return;
+    }
+    history.invalidate();
+    setBulkMessage(null);
+    setSelectedId(null);
+    setSelectedShape(null);
+    setSelectedMeasurement(null);
+    setSelectedNote(null);
+    setSelectedKey(null);
+    setSelectedPointer(null);
+    setEditingNote(null);
+    setPointerPlacement(null);
+    setPlacing(false);
+    setMultiSelection(ids.length > 1 ? ids : []);
+    if (ids.length === 1) {
+      const object = selectedObjects(history.present, ids)[0];
+      if (object.kind === "highlight") setSelectedId(ids[0]);
+      else if (object.kind === "shape") setSelectedShape(ids[0]);
+      else if (object.kind === "note") setSelectedNote(ids[0]);
+      else if (object.kind === "measurement") setSelectedMeasurement(ids[0]);
+      else setSelectedKey(ids[0]);
+    }
+    setTool("edit");
+  }
+
+  function toggleSelection(id: string) {
+    if (!visible(id) || lockedObject(id)) return;
+    selectGroup(
+      selectionIds.includes(id)
+        ? selectionIds.filter((v) => v !== id)
+        : [...selectionIds, id],
+    );
+  }
+
+  function bulkOperation(task: () => void) {
+    try {
+      task();
+    } catch (error) {
+      setBulkMessage(error instanceof Error ? error.message : String(error));
+      playActionSound("error");
+    }
+  }
+
+  function chooseMeasurement(next: MeasurementTool, page = current) {
+    selectGroup([]);
+    if (page !== current) navigate(page);
+    setTool(next);
+    setPanelOpen(window.innerWidth > 800);
+    host.current?.focus({ preventScroll: true });
+    const calibration =
+      page === current
+        ? currentCalibration
+        : session.calibrations?.find((c) => c.page === page);
+    if (next === "measure-calibrate" && calibration)
+      setCalibrationCandidate({
+        page,
+        a: calibration.a,
+        b: calibration.b,
+        before: calibration,
+        generation: history.generation,
+      });
+  }
+
+  function copySelection() {
+    bulkOperation(() => {
+      const objects = selectedObjects(session, selectionIds),
+        page = objects[0].value.page;
+      setClipboard(
+        copyMarkups(
+          session,
+          selectionIds,
+          pages[page - 1].getViewport({ scale: 1 }),
+        ),
+      );
+      setBulkMessage(
+        `Copied ${selectionIds.length} markup${selectionIds.length === 1 ? "" : "s"}.`,
+      );
+    });
+  }
+
+  function pasteSelection() {
+    bulkOperation(() => {
+      if (!clipboard) return;
+      const viewport = pages[current - 1].getViewport({ scale: 1 });
+      const center =
+        captureView().center ??
+        viewportToPdf(
+          { x: viewport.width / 2, y: viewport.height / 2 },
+          viewport,
+        );
+      const result = pasteMarkups(
+        session,
+        clipboard,
+        current,
+        viewport,
+        center,
+      );
+      dispatch(result.action);
+      selectGroup(result.ids);
+      setBulkMessage(
+        `Pasted ${result.ids.length} markup${result.ids.length === 1 ? "" : "s"} on page ${current}.`,
+      );
+    });
+  }
+
+  function duplicateSelection() {
+    bulkOperation(() => {
+      const result = duplicateMarkups(session, selectionIds, (p) =>
+        pages[p - 1].getViewport({ scale: 1 }),
+      );
+      dispatch(result.action);
+      selectGroup(result.ids);
+      setBulkMessage(
+        `Duplicated ${result.ids.length} markup${result.ids.length === 1 ? "" : "s"}.`,
+      );
+    });
+  }
+
+  function deleteSelection() {
+    bulkOperation(() => {
+      dispatch(deleteMarkups(session, selectionIds));
+      selectGroup([]);
+    });
+  }
+
+  function moveSelection(
+    dx: number,
+    dy: number,
+    generation?: number,
+    before = session,
+  ) {
+    bulkOperation(() => {
+      if (history.present !== before) return;
+      dispatch(
+        moveMarkups(before, selectionIds, dx, dy, (p) =>
+          pages[p - 1].getViewport({ scale: 1 }),
+        ),
+        generation,
+      );
+    });
+  }
+  const bulkKey = useRef<(e: KeyboardEvent) => void>(() => {});
+  bulkKey.current = (e) => {
+    if (
+      disabled ||
+      !(e.target instanceof Node) ||
+      !root.current?.contains(e.target) ||
+      (isEditingControl(e.target) &&
+        !(e.target instanceof Element && e.target.closest(".markup-select")))
+    )
+      return;
+    const key = e.key.toLowerCase(),
+      control = (e.ctrlKey || e.metaKey) && !e.altKey;
+    let action: (() => void) | undefined;
+    if (control && key === "v" && clipboard) action = pasteSelection;
+    else if (control && key === "c" && selectionIds.length)
+      action = copySelection;
+    else if (control && key === "d" && selectionIds.length)
+      action = duplicateSelection;
+    else if (control && key === "a" && host.current?.contains(e.target))
+      action = () =>
+        selectGroup(
+          [
+            ...session.annotations,
+            ...(session.shapes ?? []),
+            ...(session.notes ?? []),
+            ...(session.pageLegends ?? []),
+            ...(session.measurements ?? []),
+          ]
+            .filter(
+              (o) => o.page === current && visible(o.id) && !lockedObject(o.id),
+            )
+            .map((o) => o.id),
+        );
+    else if (
+      (multiSelection.length || selectedMeasurement) &&
+      (e.key === "Delete" || e.key === "Backspace")
+    )
+      action = deleteSelection;
+    else if (
+      (multiSelection.length || selectedMeasurement) &&
+      e.key === "Escape"
+    )
+      action = () => selectGroup([]);
+    else if (
+      (multiSelection.length || selectedMeasurement) &&
+      !control &&
+      !e.altKey &&
+      host.current?.contains(e.target)
+    ) {
+      const delta: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+      };
+      if (delta[e.key]) {
+        const [x, y] = delta[e.key],
+          distance = e.shiftKey ? 10 : 2;
+        action = () => moveSelection(x * distance, y * distance);
+      }
+    }
+    if (action) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      action();
+    }
+  };
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => bulkKey.current(e);
+    window.addEventListener("keydown", key, true);
+    return () => window.removeEventListener("keydown", key, true);
+  }, []);
   const panelButton = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLElement>(null);
   const focusPanel = useRef(false);
@@ -480,7 +905,7 @@ export default function PdfNavigationView({
       if (
         e?.type === "scroll" &&
         e.target instanceof Element &&
-        e.target.closest(".workspace-panel")
+        e.target.closest(".workspace-panel, .document-panel")
       )
         return;
       setPlacing(false);
@@ -558,7 +983,7 @@ export default function PdfNavigationView({
       if (
         e?.type === "scroll" &&
         e.target instanceof Element &&
-        e.target.closest(".note-properties, .workspace-panel")
+        e.target.closest(".note-properties, .workspace-panel, .document-panel")
       )
         return;
       setPointerPlacement(null);
@@ -647,14 +1072,24 @@ export default function PdfNavigationView({
     });
     setCurrent(best);
     setPageInput(String(best));
+    queueNavigation(best);
   }
 
-  function navigate(number: number) {
-    setViewRevision((v) => v + 1);
-    setSelectedId(null);
+  function navigate(number: number, clearSelection = true) {
     if (!Number.isInteger(number) || number < 1 || number > pages.length) {
       setPageInput(String(current));
       return;
+    }
+    setViewRevision((v) => v + 1);
+    if (clearSelection) {
+      setMultiSelection([]);
+      setSelectedId(null);
+      setSelectedShape(null);
+      setSelectedMeasurement(null);
+      setSelectedNote(null);
+      setSelectedKey(null);
+      setSelectedPointer(null);
+      setEditingNote(null);
     }
     const element = host.current;
     const target = element?.querySelector<HTMLElement>(
@@ -669,6 +1104,99 @@ export default function PdfNavigationView({
     }
     setCurrent(number);
     setPageInput(String(number));
+    queueNavigation(number);
+  }
+
+  function captureView(page = current): DocumentNavigation["view"] {
+    const element = host.current,
+      canvas = pageCanvas(page);
+    let center: Point | undefined;
+    if (element?.clientHeight && element.clientWidth && canvas) {
+      const rect = element.getBoundingClientRect();
+      center = clientToPdf(
+        {
+          x: rect.left + element.clientWidth / 2,
+          y: rect.top + element.clientHeight / 2,
+        },
+        canvas.getBoundingClientRect(),
+        pages[page - 1].getViewport({ scale: scales[page - 1] }),
+      );
+      if (![center.x, center.y].every(Number.isFinite)) center = undefined;
+    }
+    return { page, mode, zoom, ...(center ? { center } : {}) };
+  }
+
+  function reportNavigation(
+    view: DocumentNavigation["view"],
+    bookmarks = latestBookmarks.current,
+  ) {
+    const value = { bookmarks, view };
+    if (navigationCallback.current) navigationCallback.current(value);
+    else setLocalNavigation(value);
+  }
+
+  function queueNavigation(page = current) {
+    if (!navigationCallback.current) return;
+    clearTimeout(navigationTimer.current);
+    const view = captureView(page);
+    flushNavigation.current = () => {
+      clearTimeout(navigationTimer.current);
+      reportNavigation(view);
+    };
+    navigationTimer.current = setTimeout(() => flushNavigation.current(), 300);
+  }
+  useEffect(() => {
+    const unsubscribe = history.subscribeSnapshotCancellation(() =>
+      flushNavigation.current(),
+    );
+    return () => {
+      unsubscribe();
+      clearTimeout(navigationTimer.current);
+    };
+  }, [history]);
+
+  function centerAt(page: number, point: Point) {
+    const element = host.current,
+      canvas = pageCanvas(page);
+    if (!element || !canvas) return;
+    const position = pdfToClient(
+      point,
+      canvas.getBoundingClientRect(),
+      pages[page - 1].getViewport({ scale: scales[page - 1] }),
+    );
+    const rect = element.getBoundingClientRect();
+    element.scrollLeft += position.x - rect.left - element.clientWidth / 2;
+    element.scrollTop += position.y - rect.top - element.clientHeight / 2;
+    updateRasterPages();
+  }
+
+  function revealMarkup(row: MarkupRow) {
+    history.invalidate();
+    navigate(row.page);
+    centerAt(row.page, row.center);
+    if (!visible(row.id) || lockedObject(row.id)) {
+      setSelectedId(null);
+      setSelectedShape(null);
+      setSelectedNote(null);
+      setSelectedKey(null);
+      setTool("pan");
+      queueNavigation(row.page);
+      host.current?.focus({ preventScroll: true });
+      return;
+    }
+    setPlacing(false);
+    setPointerPlacement(null);
+    setSelectedPointer(null);
+    setSelectedNote(
+      row.type === "text" || row.type === "arrow" ? row.id : null,
+    );
+    setSelectedShape(row.type === "shape" ? row.id : null);
+    setSelectedMeasurement(row.type === "measurement" ? row.id : null);
+    setSelectedKey(row.type === "legend" ? row.id : null);
+    setSelectedId(row.type === "highlight" ? row.id : null);
+    setTool("edit");
+    queueNavigation(row.page);
+    host.current?.focus({ preventScroll: true });
   }
 
   function submitPage() {
@@ -768,6 +1296,21 @@ export default function PdfNavigationView({
   useLayoutEffect(() => {
     const saved = anchor.current;
     const element = host.current;
+    if (initialView.current) {
+      if (
+        element?.clientWidth &&
+        element.clientHeight &&
+        (size.width !== element.clientWidth ||
+          size.height !== element.clientHeight)
+      )
+        return;
+      const restored = initialView.current;
+      initialView.current = null;
+      navigate(restored.page, false);
+      if (restored.center) centerAt(restored.page, restored.center);
+      queueNavigation(restored.page);
+      return;
+    }
     if (saved && element) {
       const canvas = pageCanvas(saved.page);
       if (canvas) {
@@ -787,11 +1330,12 @@ export default function PdfNavigationView({
       anchor.current = null;
       pendingPage.current = null;
     } else if (pendingPage.current !== null) {
-      navigate(pendingPage.current);
+      navigate(pendingPage.current, false);
       pendingPage.current = null;
     } else if (mode !== "manual") {
-      navigate(current);
+      navigate(current, false);
     }
+    queueNavigation();
   }, [mode, zoom, size]);
 
   useEffect(() => {
@@ -800,6 +1344,8 @@ export default function PdfNavigationView({
   }, [session.shapes, selectedShape]);
 
   function selectShape(id: string | null) {
+    setMultiSelection([]);
+    if (id && (!visible(id) || lockedObject(id))) return;
     setSelectedNote(null);
     history.invalidate();
     const s = session.shapes?.find((s) => s.id === id);
@@ -813,6 +1359,8 @@ export default function PdfNavigationView({
   }
 
   function selectStroke(id: string | null) {
+    setMultiSelection([]);
+    if (id && (!visible(id) || lockedObject(id))) return;
     setSelectedNote(null);
     const stroke = annotations.find((s) => s.id === id);
     if (stroke && stroke.page !== current) navigate(stroke.page);
@@ -821,7 +1369,13 @@ export default function PdfNavigationView({
     setSelectedId(stroke?.id ?? null);
   }
 
-  function selectNote(id: string, pointer?: string) {
+  function selectNote(id: string, pointer?: string, additive = false) {
+    if (additive) {
+      toggleSelection(id);
+      return;
+    }
+    setMultiSelection([]);
+    if (id && (!visible(id) || lockedObject(id))) return;
     if (id !== selectedNote || (pointer ?? null) !== selectedPointer)
       history.invalidate();
     const n = session.notes?.find((n) => n.id === id);
@@ -838,15 +1392,25 @@ export default function PdfNavigationView({
       ref={root}
       className="pdf-navigation"
       onContextMenu={(e) => {
-        let id = selectedNote ?? selectedKey ?? selectedShape ?? selectedId;
+        let id =
+          selectedNote ??
+          selectedKey ??
+          selectedShape ??
+          selectedId ??
+          selectedMeasurement;
         let removeType:
-          "remove-note" | "remove-key" | "remove-shape" | "remove-stroke" =
-          selectedNote
-            ? "remove-note"
-            : selectedKey
-              ? "remove-key"
-              : selectedShape
-                ? "remove-shape"
+          | "remove-note"
+          | "remove-key"
+          | "remove-shape"
+          | "remove-stroke"
+          | "remove-measurement" = selectedNote
+          ? "remove-note"
+          : selectedKey
+            ? "remove-key"
+            : selectedShape
+              ? "remove-shape"
+              : selectedMeasurement
+                ? "remove-measurement"
                 : "remove-stroke";
         const node =
             e.target instanceof Element
@@ -860,7 +1424,8 @@ export default function PdfNavigationView({
             client = { x: e.clientX, y: e.clientY },
             p = clientToPdf(client, rect, viewport);
           const key = [...(session.pageLegends ?? [])].reverse().find((k) => {
-            if (k.page !== page) return false;
+            if (k.page !== page || !visible(k.id) || lockedObject(k.id))
+              return false;
             const [a, b, c, d] = keyMatrix(k),
               x = a * (p.x - k.x) + b * (p.y - k.y),
               y = c * (p.x - k.x) + d * (p.y - k.y);
@@ -872,7 +1437,8 @@ export default function PdfNavigationView({
             );
           });
           const note = [...(session.notes ?? [])].reverse().find((n) => {
-            if (n.page !== page) return false;
+            if (n.page !== page || !visible(n.id) || lockedObject(n.id))
+              return false;
             if (n.type === "text") {
               const local = noteLocal(n, p);
               return (
@@ -897,32 +1463,57 @@ export default function PdfNavigationView({
             );
           });
           const shape = pickShape(
-            (session.shapes ?? []).filter((s) => s.page === page),
+            (session.shapes ?? []).filter(
+              (s) => s.page === page && visible(s.id) && !lockedObject(s.id),
+            ),
             client,
             rect,
             viewport,
           );
           const stroke = pickHighlight(
-            annotations.filter((s) => s.page === page),
+            annotations.filter(
+              (s) => s.page === page && visible(s.id) && !lockedObject(s.id),
+            ),
             client,
             rect,
             viewport,
           );
-          id = key?.id ?? note?.id ?? shape?.id ?? stroke?.id ?? null;
-          removeType = key
-            ? "remove-key"
-            : note
-              ? "remove-note"
-              : shape
-                ? "remove-shape"
-                : "remove-stroke";
+          const measure = pickMeasurement(
+            (session.measurements ?? []).filter(
+              (m) => m.page === page && visible(m.id) && !lockedObject(m.id),
+            ),
+            client,
+            rect,
+            viewport,
+            session.calibrations?.find((c) => c.page === page),
+          );
+          id =
+            measure?.id ??
+            key?.id ??
+            note?.id ??
+            shape?.id ??
+            stroke?.id ??
+            null;
+          removeType = measure
+            ? "remove-measurement"
+            : key
+              ? "remove-key"
+              : note
+                ? "remove-note"
+                : shape
+                  ? "remove-shape"
+                  : "remove-stroke";
           history.invalidate();
+          setMultiSelection([]);
           setPlacing(false);
-          setSelectedKey(key?.id ?? null);
-          setSelectedNote(key ? null : (note?.id ?? null));
+          setSelectedMeasurement(measure?.id ?? null);
+          setSelectedKey(measure ? null : (key?.id ?? null));
+          setSelectedNote(measure || key ? null : (note?.id ?? null));
           setSelectedPointer(null);
-          setSelectedShape(key || note ? null : (shape?.id ?? null));
-          setSelectedId(key || note || shape ? null : (stroke?.id ?? null));
+          setSelectedShape(measure || key || note ? null : (shape?.id ?? null));
+          setSelectedId(
+            measure || key || note || shape ? null : (stroke?.id ?? null),
+          );
           if (id) setTool("edit");
         }
         openMenu(e, [
@@ -1044,6 +1635,23 @@ export default function PdfNavigationView({
             <option value="line">Line</option>
           </select>
         </label>
+        <label className="shape-tool-label">
+          Measure{" "}
+          <select
+            aria-label="Measurement tool"
+            value={tool.startsWith("measure-") ? tool : ""}
+            onChange={(e) => {
+              if (e.target.value)
+                chooseMeasurement(e.target.value as MeasurementTool);
+            }}
+          >
+            <option value="">Choose tool</option>
+            <option value="measure-length">Length</option>
+            <option value="measure-area">Area</option>
+            <option value="measure-perimeter">Perimeter</option>
+            <option value="measure-calibrate">Calibrate page</option>
+          </select>
+        </label>
         <button
           aria-pressed={tool === "text"}
           onClick={() => {
@@ -1091,6 +1699,34 @@ export default function PdfNavigationView({
           Hand / Pan
         </button>
         <button
+          ref={documentButton}
+          aria-expanded={documentOpen}
+          aria-controls="document-panel"
+          onClick={() => {
+            history.invalidate();
+            setDocumentOpen(!documentOpen);
+            if (!documentOpen && window.innerWidth < 1050) setPanelOpen(false);
+          }}
+        >
+          <ToolIcon name="panel" />
+          Pages & markups
+        </button>
+        <button
+          disabled={disabled}
+          aria-haspopup="dialog"
+          onClick={() => {
+            history.cancelSnapshotDrafts();
+            history.invalidate();
+            setCalibrationCandidate(undefined);
+            setEditingNote(null);
+            setPointerPlacement(null);
+            setPlacing(false);
+            setPresetsOpen(true);
+          }}
+        >
+          Presets
+        </button>
+        <button
           className="properties-toggle"
           ref={panelButton}
           aria-expanded={panelOpen}
@@ -1110,7 +1746,160 @@ export default function PdfNavigationView({
           </span>
         )}
       </div>
+      {presetsOpen && (
+        <PresetLibrary
+          session={session}
+          onApply={dispatch}
+          onCapture={(name) => {
+            const objects = selectedObjects(history.present, selectionIds);
+            const page = objects[0].value.page;
+            return captureSymbol(
+              name,
+              history.present,
+              selectionIds,
+              pages[page - 1].getViewport({ scale: 1 }),
+            );
+          }}
+          onPlace={(symbol, categories) => {
+            const viewport = pages[current - 1].getViewport({ scale: 1 });
+            const center =
+              captureView().center ??
+              viewportToPdf(
+                { x: viewport.width / 2, y: viewport.height / 2 },
+                viewport,
+              );
+            const result = placeSymbol(
+              history.present,
+              symbol,
+              current,
+              viewport,
+              center,
+              categories,
+            );
+            dispatch(result.action);
+            selectGroup(result.ids);
+            setBulkMessage(`Placed ${symbol.name} on page ${current}.`);
+          }}
+          onClose={() => {
+            setPresetsOpen(false);
+            host.current?.focus({ preventScroll: true });
+          }}
+        />
+      )}
+      {(selectionIds.length > 0 || clipboard || bulkMessage) && (
+        <div
+          className="selection-toolbar"
+          role="toolbar"
+          aria-label="Selected markups"
+        >
+          <span>{selectionIds.length} selected</span>
+          <button
+            disabled={disabled || !selectionIds.length}
+            onClick={() => {
+              copySelection();
+              host.current?.focus({ preventScroll: true });
+            }}
+            title="Copy selected markups (Ctrl+C)"
+          >
+            Copy
+          </button>
+          <button
+            disabled={disabled || !clipboard}
+            onClick={() => {
+              pasteSelection();
+              host.current?.focus({ preventScroll: true });
+            }}
+            title="Paste on the current page (Ctrl+V)"
+          >
+            Paste
+          </button>
+          <button
+            disabled={disabled || !selectionIds.length}
+            onClick={() => {
+              duplicateSelection();
+              host.current?.focus({ preventScroll: true });
+            }}
+            title="Duplicate selected markups (Ctrl+D)"
+          >
+            Duplicate
+          </button>
+          <button
+            disabled={disabled || !selectionIds.length}
+            onClick={() => {
+              deleteSelection();
+              host.current?.focus({ preventScroll: true });
+            }}
+          >
+            Delete selected
+          </button>
+          <select
+            aria-label="Selection category"
+            value=""
+            disabled={disabled || !selectionIds.length}
+            onChange={(e) => {
+              const categoryId =
+                e.target.value === "unassigned"
+                  ? null
+                  : e.target.value.replace(/^category:/, "");
+              bulkOperation(() =>
+                dispatch({
+                  type: "assign-category",
+                  ids: selectionIds,
+                  categoryId,
+                }),
+              );
+              host.current?.focus({ preventScroll: true });
+            }}
+          >
+            <option value="" disabled>
+              Assign category…
+            </option>
+            <option value="unassigned">Unassigned</option>
+            {session.legends.map((l) => (
+              <option key={l.id} value={`category:${l.id}`}>
+                {l.name}
+                {l.hidden ? " (Hidden)" : ""}
+                {l.locked ? " (Locked)" : ""}
+              </option>
+            ))}
+          </select>
+          <button
+            disabled={disabled || !selectionIds.length}
+            onClick={() => {
+              selectGroup([]);
+              host.current?.focus({ preventScroll: true });
+            }}
+          >
+            Clear selection
+          </button>
+          {bulkMessage && <span role="status">{bulkMessage}</span>}
+        </div>
+      )}
       <div className="workspace-body">
+        {documentOpen && (
+          <DocumentPanel
+            selected={selectionIds}
+            toggleSelection={toggleSelection}
+            pages={pages}
+            current={current}
+            session={session}
+            bookmarks={documentNavigation.bookmarks}
+            disabled={disabled}
+            close={() => {
+              setDocumentOpen(false);
+              documentButton.current?.focus();
+            }}
+            navigate={(page) => {
+              navigate(page);
+              host.current?.focus({ preventScroll: true });
+            }}
+            changeBookmarks={(bookmarks) => {
+              latestBookmarks.current = bookmarks;
+              reportNavigation(captureView(), bookmarks);
+            }}
+            reveal={revealMarkup}
+          />
+        )}
         <aside
           ref={panel}
           id="workspace-panel"
@@ -1140,33 +1929,100 @@ export default function PdfNavigationView({
               ? "Move around the page"
               : tool === "edit"
                 ? "Select an annotation to edit"
-                : tool.charAt(0).toUpperCase() + tool.slice(1)}
+                : tool.startsWith("measure-")
+                  ? `Measure ${tool.slice(8)}`
+                  : tool.charAt(0).toUpperCase() + tool.slice(1)}
             {tool === "highlight"
               ? ` · ${session.legends.find((l) => l.id === activeLegendId)?.name ?? COLORS.find((c) => c.value === drawing.color)?.name ?? "Custom color"}`
               : ""}
           </p>
           <div className="annotation-tools">
-            {(tool === "edit" || tool === "text" || tool === "arrow") && (
-              <NoteControls
-                notes={session.notes ?? []}
-                selected={selectedNote}
-                pointer={selectedPointer}
-                onSelect={selectNote}
-                editing={editingNote}
-                onEdit={setEditingNote}
-                onClose={() => setEditingNote(null)}
-                onPointer={() => {
-                  history.invalidate();
-                  setPointerPlacement(selectedNote);
-                  if (window.innerWidth <= 800) setPanelOpen(false);
-                }}
-                placing={!!pointerPlacement}
+            {(tool.startsWith("measure-") || currentMeasurement) && (
+              <MeasurementControls
+                page={currentMeasurement?.page ?? current}
+                tool={
+                  tool.startsWith("measure-")
+                    ? (tool as MeasurementTool)
+                    : "edit"
+                }
+                calibration={session.calibrations?.find(
+                  (c) => c.page === (currentMeasurement?.page ?? current),
+                )}
+                candidate={calibrationCandidate}
+                style={measurementStyle}
                 history={history}
-                dispatch={dispatch}
+                revision={viewRevision}
+                selected={currentMeasurement}
                 disabled={disabled}
-                revision={`${viewRevision}:${mode}:${zoom}:${tool}`}
+                lockedPage={
+                  !!session.measurements?.some(
+                    (m) =>
+                      m.page === (currentMeasurement?.page ?? current) &&
+                      lockedObject(m.id),
+                  )
+                }
+                onCalibrate={() =>
+                  chooseMeasurement(
+                    "measure-calibrate",
+                    currentMeasurement?.page ?? current,
+                  )
+                }
+                onCancel={() => chooseMeasurement("measure-length")}
+                onApply={(calibration) => {
+                  const candidate = calibrationCandidate;
+                  if (!candidate || candidate.page !== calibration.page) return;
+                  const before = history.present;
+                  dispatch(
+                    {
+                      type: "calibrate-page",
+                      page: calibration.page,
+                      calibration,
+                      before: candidate.before,
+                    },
+                    candidate.generation,
+                  );
+                  if (history.present === before) {
+                    setBulkMessage(
+                      "The scale could not be applied. Check locked measurements or draw a new reference.",
+                    );
+                    return;
+                  }
+                  setCalibrationCandidate(undefined);
+                  setTool("measure-length");
+                }}
+                onStyle={setMeasurementStyle}
+                onEdit={(measurement) => {
+                  if (currentMeasurement)
+                    dispatch({
+                      type: "put-measurement",
+                      before: currentMeasurement,
+                      measurement,
+                    });
+                }}
               />
             )}
+            {!currentMeasurement &&
+              (tool === "edit" || tool === "text" || tool === "arrow") && (
+                <NoteControls
+                  notes={session.notes ?? []}
+                  selected={selectedNote}
+                  pointer={selectedPointer}
+                  onSelect={selectNote}
+                  editing={editingNote}
+                  onEdit={setEditingNote}
+                  onClose={() => setEditingNote(null)}
+                  onPointer={() => {
+                    history.invalidate();
+                    setPointerPlacement(selectedNote);
+                    if (window.innerWidth <= 800) setPanelOpen(false);
+                  }}
+                  placing={!!pointerPlacement}
+                  history={history}
+                  dispatch={dispatch}
+                  disabled={disabled}
+                  revision={`${viewRevision}:${mode}:${zoom}:${tool}`}
+                />
+              )}
             {tool === "highlight" ? (
               <DrawingControls
                 value={drawing}
@@ -1175,7 +2031,10 @@ export default function PdfNavigationView({
                   dispatch({ type: "drawing", drawing, manual })
                 }
               />
-            ) : tool === "edit" && !currentShape && !selectedNote ? (
+            ) : tool === "edit" &&
+              !currentShape &&
+              !selectedNote &&
+              !currentMeasurement ? (
               <EditingControls
                 session={session}
                 history={history}
@@ -1184,7 +2043,7 @@ export default function PdfNavigationView({
                 dispatch={dispatch}
               />
             ) : null}
-            {((tool === "edit" && !selectedNote) ||
+            {((tool === "edit" && !selectedNote && !currentMeasurement) ||
               ["rectangle", "ellipse", "line"].includes(tool)) && (
               <ShapeControls
                 showProperties={
@@ -1270,6 +2129,7 @@ export default function PdfNavigationView({
               setSelectedId(null);
             }}
             onSelect={(id) => {
+              setMultiSelection([]);
               setSelectedNote(null);
               const k = session.pageLegends?.find((k) => k.id === id);
               if (k && k.page !== current) navigate(k.page);
@@ -1295,8 +2155,15 @@ export default function PdfNavigationView({
               event.button === 0 &&
               event.target instanceof Element &&
               !event.target.closest(".annotation-overlay")
-            )
+            ) {
+              setMultiSelection([]);
               setSelectedId(null);
+              setSelectedShape(null);
+              setSelectedNote(null);
+              setSelectedMeasurement(null);
+              setSelectedKey(null);
+              setSelectedPointer(null);
+            }
           }}
         >
           <div className="pdf-pages">
@@ -1321,6 +2188,7 @@ export default function PdfNavigationView({
                     )}
                   >
                     <AnnotationOverlay
+                      locked={lockedObject}
                       page={page.pageNumber}
                       viewport={viewport}
                       style={drawing}
@@ -1328,9 +2196,15 @@ export default function PdfNavigationView({
                       history={history}
                       tool={tool === "edit" ? "edit" : "highlight"}
                       selectedId={selectedId}
-                      onSelect={(id) => {
+                      onSelect={(id, additive) => {
+                        if (additive && id) {
+                          toggleSelection(id);
+                          return;
+                        }
+                        setMultiSelection([]);
                         setSelectedNote(null);
                         setSelectedShape(null);
+                        setSelectedMeasurement(null);
                         setSelectedId(id);
                         setSelectedKey(null);
                       }}
@@ -1345,7 +2219,11 @@ export default function PdfNavigationView({
                       }
                       viewRevision={viewRevision}
                       annotations={annotations
-                        .filter((stroke) => stroke.page === page.pageNumber)
+                        .filter(
+                          (stroke) =>
+                            stroke.page === page.pageNumber &&
+                            visible(stroke.id),
+                        )
                         .map((s) =>
                           s === roundingStroke && roundingPreview !== null
                             ? { ...s, rounding: roundingPreview }
@@ -1356,22 +2234,31 @@ export default function PdfNavigationView({
                       }
                     />
                     <ShapeOverlay
+                      locked={lockedObject}
                       page={page.pageNumber}
                       viewport={viewport}
                       shapes={(session.shapes ?? []).filter(
-                        (s) => s.page === page.pageNumber,
+                        (s) => s.page === page.pageNumber && visible(s.id),
                       )}
                       tool={
-                        tool === "text" || tool === "arrow" || tool === "pan"
+                        tool === "text" ||
+                        tool === "arrow" ||
+                        tool === "pan" ||
+                        tool.startsWith("measure-")
                           ? "highlight"
-                          : tool
+                          : (tool as "highlight" | "edit" | ShapeKind)
                       }
                       style={{
                         ...shapeStyle,
                         fill: tool === "line" ? null : shapeStyle.fill,
                       }}
                       selected={selectedShape}
-                      onSelect={(id) => {
+                      onSelect={(id, additive) => {
+                        if (additive && id) {
+                          toggleSelection(id);
+                          return;
+                        }
+                        setMultiSelection([]);
                         setSelectedNote(null);
                         setSelectedShape(id);
                         setSelectedId(null);
@@ -1388,10 +2275,11 @@ export default function PdfNavigationView({
                       revision={viewRevision}
                     />
                     <NoteOverlay
+                      locked={lockedObject}
                       page={page.pageNumber}
                       viewport={viewport}
                       notes={(session.notes ?? []).filter(
-                        (n) => n.page === page.pageNumber,
+                        (n) => n.page === page.pageNumber && visible(n.id),
                       )}
                       tool={tool === "pan" ? "highlight" : tool}
                       selected={selectedNote}
@@ -1409,10 +2297,11 @@ export default function PdfNavigationView({
                       revision={viewRevision}
                     />
                     <PageLegendOverlay
+                      locked={lockedObject}
                       rows={rows}
                       page={page.pageNumber}
                       viewport={viewport}
-                      session={session}
+                      session={workspaceSession}
                       history={history}
                       placing={placing}
                       onPlaced={() => {
@@ -1420,7 +2309,12 @@ export default function PdfNavigationView({
                         setPanelOpen(true);
                       }}
                       selected={selectedKey}
-                      onSelect={(id) => {
+                      onSelect={(id, additive) => {
+                        if (additive) {
+                          toggleSelection(id);
+                          return;
+                        }
+                        setMultiSelection([]);
                         setSelectedNote(null);
                         setSelectedShape(null);
                         setSelectedKey(id);
@@ -1432,10 +2326,84 @@ export default function PdfNavigationView({
                       disabled={disabled || !!editingNote || !!pointerPlacement}
                       revision={viewRevision}
                     />
+                    <MeasurementOverlay
+                      page={page.pageNumber}
+                      viewport={viewport}
+                      baseViewport={page.getViewport({ scale: 1 })}
+                      session={session}
+                      values={(session.measurements ?? []).filter(
+                        (m) => m.page === page.pageNumber && visible(m.id),
+                      )}
+                      calibration={session.calibrations?.find(
+                        (c) => c.page === page.pageNumber,
+                      )}
+                      reference={
+                        calibrationCandidate?.page === page.pageNumber
+                          ? calibrationCandidate
+                          : undefined
+                      }
+                      tool={
+                        tool.startsWith("measure-")
+                          ? (tool as MeasurementTool)
+                          : tool === "edit"
+                            ? "edit"
+                            : null
+                      }
+                      selected={selectedMeasurement}
+                      style={measurementStyle}
+                      history={history}
+                      revision={viewRevision}
+                      disabled={
+                        disabled ||
+                        placing ||
+                        !!editingNote ||
+                        !!pointerPlacement ||
+                        pan.className.includes("can-pan")
+                      }
+                      locked={lockedObject}
+                      onSelect={(id, additive) => {
+                        if (additive) toggleSelection(id);
+                        else selectGroup([id]);
+                      }}
+                      onScale={(page, a, b, generation) => {
+                        if (history.generation !== generation) return;
+                        setCurrent(page);
+                        setPageInput(String(page));
+                        setCalibrationCandidate({
+                          page,
+                          a,
+                          b,
+                          generation,
+                          before: session.calibrations?.find(
+                            (c) => c.page === page,
+                          ),
+                        });
+                        setPanelOpen(true);
+                      }}
+                      dispatch={dispatch}
+                      onError={setBulkMessage}
+                    />
                     {strokePreview && page.pageNumber === current && (
                       <StrokeSizePreview
                         {...strokePreview}
                         viewport={viewport}
+                      />
+                    )}
+                    {groupObjects.some(
+                      (o) => o.value.page === page.pageNumber,
+                    ) && (
+                      <SelectionOverlay
+                        objects={groupObjects.filter(
+                          (o) => o.value.page === page.pageNumber,
+                        )}
+                        session={session}
+                        viewport={viewport}
+                        scale={scales[index]}
+                        limits={groupLimits}
+                        history={history}
+                        disabled={disabled || pan.className.includes("can-pan")}
+                        revision={viewRevision}
+                        onMove={moveSelection}
                       />
                     )}
                     {historyFeedback && (

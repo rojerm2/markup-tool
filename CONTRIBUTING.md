@@ -20,8 +20,10 @@ npm run tauri dev
 ```powershell
 npm run format:check
 npm run typecheck
-npm test -- --maxWorkers=1
+npm test -- --maxWorkers=1 --testTimeout=20000
 npm run check:release
+npm audit --audit-level=high
+./scripts/audit-rust.ps1
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked --jobs 1 -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml --locked --jobs 1
 npm run build
@@ -30,6 +32,14 @@ npm run build
 Use `npm run format` to apply formatting. Keep TypeScript strict; use meaningful
 regression tests for persistence, coordinate transforms, focus, and undo.
 Run memory-intensive PDF benchmarks separately from regular tests and builds.
+
+The Windows Rust audit downloads a pinned, checksum-verified official tool into
+the ignored `.cache/security` directory and reads the current RustSec database.
+It fails on known vulnerabilities or unresolved warnings other than maintenance
+warnings in the Windows dependency graph. Review every maintenance warning;
+current findings are recorded in [SECURITY.md](SECURITY.md). Dependencies used
+only by other platforms are reported separately. Yank status is not checked.
+The npm audit includes development dependencies.
 
 Use Conventional Commit subjects such as `fix: restore focus after page entry`
 or `feat: add a markup tool`. Describe the behavior and relevant validation in

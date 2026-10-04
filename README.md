@@ -26,6 +26,12 @@ build is unsigned; trusted-publisher distribution requires a signing certificate
 - Print an annotated preview using Windows print settings.
 - Navigate large sheets with pan, fit controls, and 10–3200% zoom.
 - Undo/redo with visual feedback; use dark mode, recent files, and optional sounds.
+- Recover unsaved work after a crash; navigate with thumbnails, bookmarks, and a searchable markup list.
+- Select, copy, and edit multiple markups; hide or lock categories.
+- Calibrate each page and measure lengths, areas, and perimeters.
+- Reuse drawing presets, category sets, and symbols across projects.
+- Export or print selected pages/categories, cancel processing, and create CSV or PDF markup reports.
+- Compare original drawing revisions side by side or with color overlays and manual alignment.
 
 ## Quick start
 
@@ -65,7 +71,7 @@ does not provide native file dialogs or persistence.
 ## Quality and maintenance
 
 Windows CI checks formatting/lint, TypeScript, frontend tests, Rust lint/tests,
-release versions, production dependency advisories, and installer packaging.
+release versions, JavaScript and Windows Rust dependency advisories, and installer packaging.
 Tagged builds create a draft release for review. Dependencies are checked weekly.
 
 - [Contributing](CONTRIBUTING.md)
@@ -77,12 +83,16 @@ Tagged builds create a draft release for review. Dependencies are checked weekly
 ## Limits and privacy
 
 PDF input/export is limited to 256 MiB; project annotation metadata to 16 MiB.
-Complex CAD files can require substantial memory. Export rewrites the full PDF.
+Complex CAD files can require substantial memory. Export parses the source PDF
+and rewrites the selected output pages.
 Projects include the entire source PDF and are not encrypted. Markup is not
 secure redaction. Unapplied text/property drafts are excluded from output.
+Local crash recovery also contains unencrypted document copies. Presets can
+contain annotation text; review them before sharing. Measurements depend on
+page calibration and drawing accuracy; comparison is a visual review aid.
 
 The application has no document-upload service or telemetry. Recent-file paths
-and preferences are stored locally. Reports should use synthetic documents and
+and preferences are stored locally. Bug reports should use synthetic documents and
 sanitized logs; never attach confidential files to public issues.
 
 ## License

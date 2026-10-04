@@ -7,7 +7,9 @@ deployment is required.
 1. Update versions together in `package.json`, `package-lock.json`,
    `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and
    `src-tauri/tauri.conf.json`.
-2. Add `docs/releases/v<VERSION>.md` and update `CHANGELOG.md`.
+2. Add `docs/releases/v<VERSION>.md` and update `CHANGELOG.md`. Review current
+   dependency findings and run `node scripts/check-font-license.mjs`. Retain
+   MIT ownership, third-party notices, and the bundled font's corresponding source.
 3. Run the checks in [CONTRIBUTING.md](../CONTRIBUTING.md), then verify the
    packaged app with a synthetic document. Test open/save/reopen without the
    original, export, print/cancel, dark mode, zoom, keyboard focus, and undo.

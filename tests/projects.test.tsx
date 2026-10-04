@@ -42,8 +42,12 @@ vi.mock("../src/services/projectService", () => ({
 const native = vi.hoisted(() => ({
   close: null as null | ((event: { preventDefault: () => void }) => void),
   destroy: vi.fn(),
+  invoke: vi.fn(),
 }));
-vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true }));
+vi.mock("@tauri-apps/api/core", () => ({
+  isTauri: () => true,
+  invoke: native.invoke,
+}));
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     onCloseRequested: async (handler: typeof native.close) => {
@@ -95,6 +99,91 @@ async function openPdf() {
   await idle();
 }
 
+it("saves bookmarks in portable projects while view changes stay clean and out of annotation Undo", async () => {
+  render(<App />);
+  await openPdf();
+  click("Next page");
+  click("Save Project");
+  await idle();
+  let project = parseProject(
+    vi.mocked(files.writeProject).mock.calls.at(-1)![2],
+  );
+  expect(project.navigation?.view.page).toBe(2);
+  expect(project.navigation?.bookmarks).toEqual([]);
+  expect(status()).toContain("Saved");
+  click("Previous page");
+  expect(status()).toContain("Saved");
+  click("Pages & markups");
+  fireEvent.click(screen.getByRole("tab", { name: "Bookmarks" }));
+  fireEvent.change(screen.getByLabelText("Bookmark label"), {
+    target: { value: "Ground floor" },
+  });
+  click("Bookmark this page");
+  expect(status()).toContain("Unsaved changes");
+  expect(
+    screen
+      .getByRole("button", { name: "Undo", exact: true })
+      .hasAttribute("disabled"),
+  ).toBe(true);
+  click("Save Project");
+  await idle();
+  project = parseProject(vi.mocked(files.writeProject).mock.calls.at(-1)![2]);
+  expect(project.navigation?.bookmarks).toEqual([
+    { page: 1, label: "Ground floor" },
+  ]);
+  const cached = JSON.parse(localStorage.getItem("pdf-markup.navigation")!);
+  expect(
+    cached.every(
+      (entry: { navigation: { bookmarks: unknown[] } }) =>
+        entry.navigation.bookmarks.length === 0,
+    ),
+  ).toBe(true);
+  cleanup();
+  vi.mocked(files.readProject).mockResolvedValue({
+    path: "C:\\plans\\one.pmarkup",
+    project,
+  });
+  vi.mocked(files.resolveSource).mockResolvedValue("C:\\Temp\\embedded.pdf");
+  render(<App />);
+  click("Open Project");
+  await screen.findByLabelText("PDF page 2");
+  await idle();
+  click("Pages & markups");
+  fireEvent.click(screen.getByRole("tab", { name: "Bookmarks" }));
+  expect(
+    screen.getByRole("button", { name: "Ground floor Page 1" }),
+  ).toBeTruthy();
+  expect(status()).toContain("Saved");
+});
+
+it("keeps bookmark edits made during a slow save dirty", async () => {
+  render(<App />);
+  await openPdf();
+  click("Pages & markups");
+  fireEvent.click(screen.getByRole("tab", { name: "Bookmarks" }));
+  const saving = deferred<string | null>();
+  vi.mocked(files.writeProject).mockReturnValueOnce(saving.promise);
+  click("Save Project");
+  fireEvent.change(screen.getByLabelText("Bookmark label"), {
+    target: { value: "Edited during save" },
+  });
+  click("Bookmark this page");
+  saving.resolve("C:\\plans\\one.pmarkup");
+  await idle();
+  expect(status()).toContain("Unsaved changes");
+  expect(
+    parseProject(vi.mocked(files.writeProject).mock.calls[0][2]).navigation
+      ?.bookmarks,
+  ).toEqual([]);
+  click("Save Project");
+  await idle();
+  expect(
+    parseProject(vi.mocked(files.writeProject).mock.calls[1][2]).navigation
+      ?.bookmarks[0].label,
+  ).toBe("Edited during save");
+  expect(status()).toContain("Saved");
+});
+
 function create(name = "Walls") {
   if (!screen.queryByLabelText("Legend name")) click("Legends (0)");
   fireEvent.change(screen.getByLabelText("Legend name"), {
@@ -112,7 +201,13 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 beforeEach(() => {
+  localStorage.removeItem("pdf-markup.navigation");
   vi.resetAllMocks();
+  native.invoke.mockImplementation(async (command: string) => {
+    if (command === "list_recovery") return [];
+    if (command === "write_recovery") return "a".repeat(64);
+    return null;
+  });
   vi.mocked(recents.listRecentFiles).mockResolvedValue([]);
   vi.mocked(recents.rememberRecentFile).mockResolvedValue([]);
   vi.mocked(recents.authorizeRecentFile).mockResolvedValue();
@@ -140,6 +235,115 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+it("recovers unsaved work without the original PDF and saves it as a new portable project", async () => {
+  const id = "b".repeat(64);
+  const cache = "C:\\Temp\\recovered-source.pdf";
+  native.invoke.mockImplementation(async (command: string) => {
+    if (command === "list_recovery")
+      return [{ id, filename: source.filename, updatedAt: Date.now() }];
+    if (command === "read_recovery")
+      return {
+        sourcePath: cache,
+        text: JSON.stringify({
+          format: "pdf-markup-project",
+          version: 2,
+          source,
+          session: {
+            ...emptySession,
+            legends: [
+              { id: "wall", name: "Recovered walls", color: "#facc15" },
+            ],
+          },
+        }),
+      };
+    return null;
+  });
+  render(<App />);
+  click(
+    (
+      await screen.findByRole("button", {
+        name: `Recover ${source.filename}`,
+        exact: true,
+      })
+    ).textContent!,
+  );
+  await screen.findByLabelText("PDF page 2");
+  await idle();
+  expect(files.choosePdf).not.toHaveBeenCalled();
+  expect(files.loadSource).toHaveBeenCalledWith(cache, expect.any(AbortSignal));
+  expect(status()).toContain("Unsaved changes");
+  click("Save Project");
+  await idle();
+  expect(files.writeProject).toHaveBeenCalledWith(
+    null,
+    cache,
+    expect.any(String),
+  );
+  const saved = parseProject(vi.mocked(files.writeProject).mock.calls[0][2]);
+  expect(saved.session.legends[0].name).toBe("Recovered walls");
+  expect(saved.source.filename).toBe(source.filename);
+  expect(native.invoke).toHaveBeenCalledWith("delete_recovery", { id });
+  expect(status()).not.toContain("Unsaved changes");
+});
+
+it("dismisses a recovery checkpoint without opening or modifying a document", async () => {
+  const id = "b".repeat(64);
+  native.invoke.mockImplementation(async (command: string) =>
+    command === "list_recovery"
+      ? [{ id, filename: source.filename, updatedAt: Date.now() }]
+      : null,
+  );
+  render(<App />);
+  await screen.findByRole("button", {
+    name: `Dismiss ${source.filename}`,
+    exact: true,
+  });
+  click(`Dismiss ${source.filename}`);
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: `Recover ${source.filename}` }),
+    ).toBeNull(),
+  );
+  expect(native.invoke).toHaveBeenCalledWith("delete_recovery", { id });
+  expect(files.loadSource).not.toHaveBeenCalled();
+});
+
+it("keeps recovery available after a source identity failure", async () => {
+  const id = "b".repeat(64);
+  native.invoke.mockImplementation(async (command: string) => {
+    if (command === "list_recovery")
+      return [{ id, filename: source.filename, updatedAt: Date.now() }];
+    if (command === "read_recovery")
+      return {
+        sourcePath: "C:\\Temp\\wrong.pdf",
+        text: JSON.stringify({
+          format: "pdf-markup-project",
+          version: 2,
+          source: { ...source, sha256: "c".repeat(64) },
+          session: emptySession,
+        }),
+      };
+    return null;
+  });
+  render(<App />);
+  await screen.findByRole("button", {
+    name: `Recover ${source.filename}`,
+    exact: true,
+  });
+  click(`Recover ${source.filename}`);
+  await idle();
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Recovery source identity mismatch",
+  );
+  expect(
+    screen.getByRole("button", { name: `Recover ${source.filename}` }),
+  ).toBeTruthy();
+  expect(screen.queryByLabelText("PDF page 2")).toBeNull();
+  expect(native.invoke).not.toHaveBeenCalledWith(
+    "delete_recovery",
+    expect.anything(),
+  );
 });
 it("opens a bundled project without a PDF picker, preserves its filename and exports from the included PDF", async () => {
   const cached = "C:\\Temp\\pdf-markup-included.pdf";
@@ -191,6 +395,7 @@ it("opens a bundled project without a PDF picker, preserves its filename and exp
     expect.anything(),
     expect.any(AbortSignal),
     expect.any(Function),
+    undefined,
   );
 });
 
@@ -1087,6 +1292,47 @@ it("failed/cancelled saves preserve redo and dirty close locks history until can
   expect(status()).toContain("Saved");
 });
 
+it("does not save or print the background project from preset dialog shortcuts", async () => {
+  render(<App />);
+  await openPdf();
+  click("Presets");
+  const button = screen
+    .getByRole("dialog", { name: "Presets" })
+    .querySelector("button")!;
+  fireEvent.keyDown(button, { key: "s", ctrlKey: true });
+  fireEvent.keyDown(button, { key: "p", ctrlKey: true });
+  expect(files.writeProject).not.toHaveBeenCalled();
+  expect(exports.printPdf).not.toHaveBeenCalled();
+  expect(screen.getByRole("dialog", { name: "Presets" })).toBeDefined();
+  click("Close");
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+it("comparison isolates background shortcuts even when focus leaves the dialog and preserves the project", async () => {
+  render(<App />);
+  await openPdf();
+  click("Thick");
+  click("Compare PDFs…");
+  expect(
+    screen.getByRole("dialog", { name: "Compare PDF revisions" }),
+  ).toBeTruthy();
+  fireEvent.keyDown(document.body, { key: "s", ctrlKey: true });
+  fireEvent.keyDown(document.body, { key: "p", ctrlKey: true });
+  fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
+  expect(files.writeProject).not.toHaveBeenCalled();
+  expect(exports.printPdf).not.toHaveBeenCalled();
+  click("Close comparison");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Compare PDFs…" }),
+  );
+  click("Save Project");
+  await idle();
+  expect(
+    parseProject(vi.mocked(files.writeProject).mock.calls.at(-1)![2]).session
+      .drawing.width,
+  ).toBe(20);
+});
+
 it("undo creation clears a stale legend rename target and allows a new category", async () => {
   render(<App />);
   await openPdf();
@@ -1170,6 +1416,62 @@ it("cancelled/failed exports preserve dirty baseline and unmount aborts a pendin
   view.unmount();
   expect(signal.aborted).toBe(true);
   await act(async () => pendingExport.resolve("C:/late.pdf"));
+});
+it("cancel stops only the current export and retry captures the same committed state", async () => {
+  render(<App />);
+  await openPdf();
+  click("Thick");
+  let signal!: AbortSignal;
+  vi.mocked(exports.exportPdf).mockImplementationOnce(async (...args) => {
+    signal = args[4];
+    args[5]?.("Building PDF…");
+    return await new Promise((_, reject) =>
+      signal.addEventListener("abort", () => reject(signal.reason), {
+        once: true,
+      }),
+    );
+  });
+  click("Export Annotated PDF");
+  click("Cancel");
+  await idle();
+  expect(signal.aborted).toBe(true);
+  expect(status()).toContain("Cancelled. No output file was saved.");
+  expect(status()).toContain("Unsaved changes");
+  expect(screen.queryByRole("alert")).toBeNull();
+  vi.mocked(exports.exportPdf).mockResolvedValueOnce("C:/retry.pdf");
+  click("Export Annotated PDF");
+  await idle();
+  const args = vi.mocked(exports.exportPdf).mock.calls[1];
+  expect(args[4].aborted).toBe(false);
+  expect(args[3].drawing.width).toBe(20);
+  expect(status()).toContain("Exported retry.pdf");
+  expect(status()).toContain("Unsaved changes");
+});
+it("advanced export and print route validated page selection without saving the editable project", async () => {
+  render(<App />);
+  await openPdf();
+  click("Next page");
+  click("Export options…");
+  fireEvent.click(screen.getByLabelText("Current page (2)"));
+  click("Export");
+  await idle();
+  expect(vi.mocked(exports.exportPdf).mock.calls[0][6]).toMatchObject({
+    pages: [2],
+    categoryIds: null,
+    includeHidden: true,
+  });
+  click("Export options…");
+  fireEvent.click(screen.getByLabelText("Current page (2)"));
+  fireEvent.change(screen.getByLabelText("Output"), {
+    target: { value: "print" },
+  });
+  click("Prepare print");
+  await idle();
+  expect(vi.mocked(exports.printPdf).mock.calls[0][5]).toMatchObject({
+    pages: [2],
+  });
+  expect(files.writeProject).not.toHaveBeenCalled();
+  expect(status()).not.toContain("Unsaved changes");
 });
 it("export during unfinished move/draw cancels previews and captures only committed geometry", async () => {
   const original = await openEditable();

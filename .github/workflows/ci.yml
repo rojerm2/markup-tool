@@ -36,8 +36,11 @@ jobs:
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm run check:release
-      - run: npm test -- --maxWorkers=1
-      - run: npm audit --omit=dev --audit-level=high
+      - run: npm test -- --maxWorkers=1 --testTimeout=20000
+      - run: npm audit --audit-level=high
+      - name: Audit locked Rust dependencies for Windows
+        shell: pwsh
+        run: ./scripts/audit-rust.ps1
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
       - run: npm run tauri build -- --bundles nsis

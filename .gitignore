@@ -78,16 +78,26 @@ Desktop.ini
 
 # Coverage
 coverage/
+.cache/
 
 # TypeScript
 *.tsbuildinfo
 
 internal_docs/
+# Local workflow configuration and working notes.
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.agents/
+.codex/
+.claude/
+.cursor/
 public/pdfjs/
 public/THIRD_PARTY_LICENSES.txt
 public/RUST_LICENSES.txt
 # Private documents and deploy artifacts belong outside source control.
 *.pmarkup
+*.pmpreset
 *.pfx
 *.p12
 *.pem

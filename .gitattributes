@@ -17,3 +17,4 @@
 *.icns binary
 *.ttf binary
 *.pdf binary
+third_party/nsis/COPYING -text -whitespace

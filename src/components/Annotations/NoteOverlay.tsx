@@ -44,6 +44,7 @@ export default function NoteOverlay({
   history,
   disabled,
   revision,
+  locked = () => false,
 }: {
   page: number;
   viewport: PageViewport;
@@ -52,13 +53,14 @@ export default function NoteOverlay({
   selected: string | null;
   pointer: string | null;
   placing: string | null;
-  onSelect: (id: string, pointer?: string) => void;
+  onSelect: (id: string, pointer?: string, additive?: boolean) => void;
   onEdit: (n: TextNote) => void;
   onPlaced: () => void;
   dispatch: (a: SessionAction, g?: number) => void;
   history: SessionHistory;
   disabled: boolean;
   revision: number;
+  locked?: (id: string) => boolean;
 }) {
   const svg = useRef<SVGSVGElement>(null),
     capture = useRef<SVGSVGElement | null>(null);
@@ -197,12 +199,20 @@ export default function NoteOverlay({
           )
         : undefined;
     if (!before && tool !== "text" && tool !== "arrow") return;
+    if (before && locked(before.id)) return;
     e.preventDefault();
     e.stopPropagation();
     const handle =
       target.closest("[data-note-handle]")?.getAttribute("data-note-handle") ??
       target.closest("[data-pointer-id]")?.getAttribute("data-pointer-id") ??
       null;
+    if (before && !placing && e.shiftKey && !handle) {
+      e.currentTarget
+        .closest<HTMLElement>(".pdf-scroll")
+        ?.focus({ preventScroll: true });
+      onSelect(before.id, undefined, true);
+      return;
+    }
     if (before && !placing)
       onSelect(
         before.id,
@@ -357,7 +367,12 @@ export default function NoteOverlay({
               .closest("[data-note-id]")
               ?.getAttribute("data-note-id"),
         );
-        if (!disabled && tool === "edit" && found?.type === "text")
+        if (
+          !disabled &&
+          tool === "edit" &&
+          found?.type === "text" &&
+          !locked(found.id)
+        )
           onEdit(found);
       }}
     >

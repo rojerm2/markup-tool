@@ -101,6 +101,7 @@ export default function LegendControls({
                 <button
                   className="legend-select"
                   aria-label={`Select legend ${legend.name}`}
+                  disabled={legend.hidden || legend.locked}
                   aria-pressed={session.activeLegendId === legend.id}
                   onClick={() => dispatch({ type: "select", id: legend.id })}
                 >
@@ -122,12 +123,42 @@ export default function LegendControls({
                 </button>
                 <button
                   aria-label={`Delete legend ${legend.name}`}
+                  disabled={legend.locked}
                   onClick={() => {
                     dispatch({ type: "delete", id: legend.id });
                     if (editing === legend.id) reset();
                   }}
                 >
                   Delete
+                </button>
+                <button
+                  aria-label={`${legend.hidden ? "Show" : "Hide"} category ${legend.name}`}
+                  aria-pressed={!!legend.hidden}
+                  title="Hide in the workspace; exported PDFs still include this category"
+                  onClick={() =>
+                    dispatch({
+                      type: "category-settings",
+                      id: legend.id,
+                      hidden: !legend.hidden,
+                      locked: !!legend.locked,
+                    })
+                  }
+                >
+                  {legend.hidden ? "Show" : "Hide"}
+                </button>
+                <button
+                  aria-label={`${legend.locked ? "Unlock" : "Lock"} category ${legend.name}`}
+                  aria-pressed={!!legend.locked}
+                  onClick={() =>
+                    dispatch({
+                      type: "category-settings",
+                      id: legend.id,
+                      hidden: !!legend.hidden,
+                      locked: !legend.locked,
+                    })
+                  }
+                >
+                  {legend.locked ? "Unlock" : "Lock"}
                 </button>
               </div>
             ))}

@@ -20,6 +20,11 @@ assert.equal(appLock?.match(/version = "([^"]+)"/)?.[1], version);
 assert.equal(tauri.identifier, "com.orcific.pdf-markup-tool");
 assert.equal(pkg.license, "MIT");
 assert.equal(tauri.bundle.targets.includes("nsis"), true);
+assert.equal(
+  tauri.bundle.resources["../third_party/nsis/COPYING"],
+  "licenses/NSIS_COPYING",
+  "NSIS upstream license must accompany the installer",
+);
 assert.ok(tauri.app.security.csp);
 assert.ok(!tauri.app.security.csp.includes("'unsafe-eval'"));
 const tag =
@@ -31,6 +36,7 @@ if (tag)
 for (const file of [
   "LICENSE",
   "THIRD_PARTY_NOTICES.md",
+  "third_party/nsis/COPYING",
   `docs/releases/v${version}.md`,
 ]) {
   assert.ok(fs.existsSync(file), `Missing release file: ${file}`);

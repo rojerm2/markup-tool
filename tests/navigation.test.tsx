@@ -10,6 +10,736 @@ import type { PDFPageProxy } from "pdfjs-dist";
 import PdfNavigationView from "../src/components/PdfViewer/PdfNavigationView";
 import { SessionHistory } from "../src/services/sessionHistory";
 import { emptySession } from "../src/services/annotationSession";
+import {
+  applyPreset,
+  capturePreset,
+  writePresetLibrary,
+} from "../src/services/presets";
+import { DEFAULT_TOOL_STYLES } from "../src/services/toolStyles";
+
+it("keeps preset dialog shortcuts out of the canvas and places a stored selection with atomic undo", () => {
+  HTMLDialogElement.prototype.showModal = function () {
+    this.setAttribute("open", "");
+    this.querySelector<HTMLButtonElement>("button")?.focus();
+  };
+  localStorage.clear();
+  const before = bulkFixture(),
+    history = new SessionHistory(before);
+  writePresetLibrary([capturePreset("Plans", before)]);
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  selectBulkRows();
+  fireEvent.click(screen.getByRole("button", { name: "Presets", exact: true }));
+  const close = screen.getByRole("button", { name: "Close", exact: true });
+  fireEvent.keyDown(close, { key: " ", code: "Space" });
+  expect(
+    screen
+      .getByRole("region", { name: "PDF pages" })
+      .classList.contains("can-pan"),
+  ).toBe(false);
+  fireEvent.keyDown(close, { key: "Delete" });
+  fireEvent.keyDown(close, { key: "a", ctrlKey: true });
+  fireEvent.keyDown(close, { key: "z", ctrlKey: true });
+  expect(history.present).toBe(before);
+  fireEvent.change(screen.getByLabelText("New symbol name"), {
+    target: { value: "Fixture" },
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Save selected markups as symbol" }),
+  );
+  expect(screen.getByRole("img", { name: "Preview of Fixture" })).toBeDefined();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Place on current page" }),
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(history.present.annotations).toHaveLength(2);
+  expect(history.present.shapes).toHaveLength(2);
+  expect(history.undoLabel).toBe("Place symbol");
+  expect(document.activeElement).toBe(
+    screen.getByRole("region", { name: "PDF pages" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Undo", exact: true }));
+  expect(history.present).toBe(before);
+  localStorage.clear();
+});
+
+it("restores preset tool styles in the viewer and undoes/redoes their application without changing existing measurements", () => {
+  measurementRect();
+  const history = new SessionHistory(emptySession),
+    preset = capturePreset("Dimensions", {
+      ...emptySession,
+      toolStyles: {
+        ...DEFAULT_TOOL_STYLES,
+        measurement: { color: "#ff0000", width: 4, fontSize: 24 },
+      },
+    });
+  history.apply(
+    applyPreset(history.present, preset, { styles: true, categories: false })
+      .action!,
+  );
+  const applied = history.present;
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  fireEvent.change(screen.getByLabelText("Measurement tool"), {
+    target: { value: "measure-length" },
+  });
+  expect(
+    (screen.getByLabelText("Measurement text size") as HTMLInputElement).value,
+  ).toBe("24");
+  expect(
+    (screen.getByLabelText("Measurement color") as HTMLInputElement).value,
+  ).toBe("#ff0000");
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(history.present).toBe(emptySession);
+  expect(
+    (screen.getByLabelText("Measurement text size") as HTMLInputElement).value,
+  ).toBe("12");
+  fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+  expect(history.present).toBe(applied);
+  measurementLine();
+  expect(history.present.measurements![0]).toMatchObject({
+    color: "#ff0000",
+    width: 4,
+    fontSize: 24,
+  });
+});
+
+function bulkFixture() {
+  return {
+    ...emptySession,
+    legends: [{ id: "walls", name: "Walls", color: "#facc15" }],
+    annotations: [
+      {
+        id: "stroke",
+        type: "freehand" as const,
+        page: 1,
+        legendId: null,
+        color: "#facc15",
+        opacity: 0.4,
+        width: 10,
+        points: [
+          { x: 100, y: 200 },
+          { x: 200, y: 200 },
+        ],
+      },
+    ],
+    shapes: [
+      {
+        id: "shape",
+        type: "rectangle" as const,
+        page: 1,
+        a: { x: 100, y: 300 },
+        b: { x: 200, y: 400 },
+        color: "#facc15",
+        width: 2,
+        fill: null,
+      },
+    ],
+  };
+}
+
+function selectBulkRows() {
+  fireEvent.click(screen.getByRole("button", { name: "Pages & markups" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Markups" }));
+  const boxes = Array.from(
+    document.querySelectorAll<HTMLInputElement>(".markup-select"),
+  );
+  boxes.forEach((box) => fireEvent.click(box));
+  return boxes;
+}
+
+function measurementRect() {
+  vi.spyOn(SVGElement.prototype, "getBoundingClientRect").mockImplementation(
+    function (this: SVGElement) {
+      return this.closest("[data-page]")!
+        .querySelector("canvas")!
+        .getBoundingClientRect();
+    },
+  );
+}
+
+function measurementPoint(pageNumber: number, x: number, y: number) {
+  const box = screen
+    .getByLabelText(`PDF page ${pageNumber}`)
+    .getBoundingClientRect();
+  return {
+    clientX: box.left + (x * box.width) / 600,
+    clientY: box.top + ((800 - y) * box.height) / 800,
+  };
+}
+
+function measurementLine(pageNumber: number = 1) {
+  const svg = screen.getByLabelText(`Measurements for page ${pageNumber}`);
+  fireEvent.pointerDown(svg, {
+    button: 0,
+    pointerId: 7,
+    ...measurementPoint(pageNumber, 100, 200),
+  });
+  fireEvent.pointerMove(svg, {
+    buttons: 1,
+    pointerId: 7,
+    ...measurementPoint(pageNumber, 200, 200),
+  });
+  fireEvent.pointerUp(svg, {
+    pointerId: 7,
+    ...measurementPoint(pageNumber, 200, 200),
+  });
+}
+
+it("calibrates one page, measures length, recalibrates with undo and keeps other pages explicitly uncalibrated", () => {
+  measurementRect();
+  const history = new SessionHistory(emptySession);
+  render(<PdfNavigationView pages={[page(1), page(2)]} history={history} />);
+  const tool = screen.getByLabelText("Measurement tool");
+  fireEvent.change(tool, { target: { value: "measure-calibrate" } });
+  measurementLine();
+  expect(history.undoLabel).toBeUndefined();
+  fireEvent.scroll(
+    screen.getByRole("complementary", { name: "Tools and properties" }),
+  );
+  fireEvent.blur(window);
+  expect(screen.getByLabelText("Scale reference")).toBeDefined();
+  fireEvent.change(screen.getByLabelText("Known distance"), {
+    target: { value: "10" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply scale" }));
+  expect(history.present.calibrations![0].distance).toBe(10);
+  expect(history.present.calibrations![0].unit).toBe("m");
+  expect(history.undoLabel).toBe("Calibrate page");
+  measurementLine();
+  expect(history.present.measurements).toHaveLength(1);
+  const label = () =>
+    document.querySelector("[data-measurement-id] text")!.textContent;
+  expect(label()).toBe("10 m");
+  fireEvent.change(tool, { target: { value: "measure-calibrate" } });
+  fireEvent.change(screen.getByLabelText("Known distance"), {
+    target: { value: "20" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply scale" }));
+  expect(label()).toBe("20 m");
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(label()).toBe("10 m");
+  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+  measurementLine(2);
+  expect(history.present.measurements).toHaveLength(2);
+  expect(history.present.calibrations).toHaveLength(1);
+  expect(
+    screen.getByLabelText("Measurements for page 2").querySelector("text")!
+      .textContent,
+  ).toBe("100 PDF units (uncalibrated)");
+});
+
+it("draws simple area/perimeter polygons and cancels invalid, saved or panned drafts without undo entries", () => {
+  measurementRect();
+  const history = new SessionHistory(emptySession);
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  const tool = screen.getByLabelText("Measurement tool"),
+    host = screen.getByRole("region", { name: "PDF pages" });
+  fireEvent.change(tool, { target: { value: "measure-area" } });
+  const svg = screen.getByLabelText("Measurements for page 1");
+  const vertex = (x: number, y: number) =>
+    fireEvent.pointerDown(svg, {
+      button: 0,
+      pointerId: 7,
+      ...measurementPoint(1, x, y),
+    });
+  [
+    [100, 100],
+    [200, 100],
+    [200, 200],
+    [100, 200],
+  ].forEach(([x, y]) => vertex(x, y));
+  fireEvent.keyDown(host, { key: "Enter" });
+  expect(history.present.measurements?.[0].type).toBe("area");
+  expect(svg.querySelector("text")!.textContent).toBe(
+    "10,000 PDF units² (uncalibrated)",
+  );
+  const before = history.present;
+  [
+    [100, 100],
+    [200, 200],
+    [100, 200],
+    [200, 100],
+  ].forEach(([x, y]) => vertex(x, y));
+  fireEvent.keyDown(host, { key: "Enter" });
+  expect(history.present).toBe(before);
+  expect(screen.getByText(/simple polygon without crossing/)).toBeDefined();
+  vertex(100, 100);
+  vertex(200, 100);
+  act(() => history.cancelSnapshotDrafts());
+  fireEvent.keyDown(host, { key: "Enter" });
+  expect(history.present).toBe(before);
+  vertex(100, 100);
+  vertex(200, 100);
+  fireEvent.keyDown(host, { code: "Space", key: " " });
+  fireEvent.keyUp(host, { code: "Space", key: " " });
+  fireEvent.keyDown(host, { key: "Enter" });
+  expect(history.present).toBe(before);
+  fireEvent.change(tool, { target: { value: "measure-perimeter" } });
+  [
+    [100, 100],
+    [200, 100],
+    [200, 200],
+    [100, 200],
+  ].forEach(([x, y]) => vertex(x, y));
+  fireEvent.keyDown(host, { key: "Enter" });
+  expect(history.present.measurements?.[1].type).toBe("perimeter");
+  expect(svg.querySelectorAll("text")[1].textContent).toBe(
+    "400 PDF units (uncalibrated)",
+  );
+});
+
+it("selects measurements from the list, nudges with arrows, applies appearance atomically and respects category protection", () => {
+  measurementRect();
+  const measurement = {
+    id: "dimension",
+    page: 1,
+    type: "length" as const,
+    points: [
+      { x: 100, y: 200 },
+      { x: 200, y: 200 },
+    ],
+    color: "#0284c7",
+    width: 2,
+    fontSize: 12,
+  };
+  const history = new SessionHistory({
+    ...emptySession,
+    measurements: [measurement],
+    legends: [{ id: "walls", name: "Walls", color: "#facc15" }],
+    objectCategories: { dimension: "walls" },
+  });
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  fireEvent.click(screen.getByRole("button", { name: "Pages & markups" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Markups" }));
+  fireEvent.change(screen.getByLabelText("Markup type filter"), {
+    target: { value: "measurement" },
+  });
+  fireEvent.click(document.querySelector(".markup-jump")!);
+  const host = screen.getByRole("region", { name: "PDF pages" });
+  expect(document.activeElement).toBe(host);
+  fireEvent.keyDown(host, { key: "ArrowRight" });
+  expect(history.present.measurements![0].points[0].x).toBe(102);
+  const before = history.present;
+  fireEvent.click(screen.getByRole("button", { name: "Properties" }));
+  fireEvent.change(screen.getByLabelText("Measurement text size"), {
+    target: { value: "24" },
+  });
+  expect(history.present).toBe(before);
+  fireEvent.click(screen.getByRole("button", { name: "Apply appearance" }));
+  expect(history.present.measurements![0].fontSize).toBe(24);
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(history.present).toBe(before);
+  fireEvent.click(screen.getByRole("button", { name: "Legends (1)" }));
+  fireEvent.click(screen.getByRole("button", { name: "Lock category Walls" }));
+  fireEvent.change(screen.getByLabelText("Measurement tool"), {
+    target: { value: "measure-calibrate" },
+  });
+  expect(
+    screen
+      .getByRole("button", { name: "Calibrate page" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Hide category Walls" }));
+  expect(
+    screen
+      .getByLabelText("Measurements for page 1")
+      .querySelector("[data-measurement-id]"),
+  ).toBeNull();
+});
+
+it("edits measurement vertices in one undo step, cancels stale drags and appearance drafts, and clears empty-space selection", () => {
+  measurementRect();
+  const value = {
+      id: "dimension",
+      page: 1,
+      type: "length" as const,
+      points: [
+        { x: 100, y: 200 },
+        { x: 200, y: 200 },
+      ],
+      color: "#0284c7",
+      width: 2,
+      fontSize: 12,
+    },
+    history = new SessionHistory({ ...emptySession, measurements: [value] });
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  fireEvent.click(screen.getByRole("button", { name: "100%" }));
+  fireEvent.click(screen.getByRole("button", { name: "Select/Edit" }));
+  const svg = screen.getByLabelText("Measurements for page 1"),
+    host = screen.getByRole("region", { name: "PDF pages" });
+  fireEvent.pointerDown(svg.querySelector("[data-measurement-id]")!, {
+    button: 0,
+    pointerId: 7,
+    ...measurementPoint(1, 100, 200),
+  });
+  fireEvent.pointerUp(svg, { pointerId: 7, ...measurementPoint(1, 100, 200) });
+  const before = history.present;
+  fireEvent.pointerDown(svg.querySelector('[data-measurement-vertex="1"]')!, {
+    button: 0,
+    pointerId: 7,
+    ...measurementPoint(1, 200, 200),
+  });
+  fireEvent.pointerMove(svg, {
+    buttons: 1,
+    pointerId: 7,
+    ...measurementPoint(1, 250, 250),
+  });
+  expect(history.present).toBe(before);
+  fireEvent.pointerUp(svg, { pointerId: 7, ...measurementPoint(1, 250, 250) });
+  expect(history.present.measurements![0].points[1]).toEqual({
+    x: 250,
+    y: 250,
+  });
+  expect(history.undoLabel).toBe("Draw/edit measurement");
+  fireEvent.change(screen.getByLabelText("Measurement text size"), {
+    target: { value: "24" },
+  });
+  act(() => history.cancelSnapshotDrafts());
+  expect(
+    (screen.getByLabelText("Measurement text size") as HTMLInputElement).value,
+  ).toBe("12");
+  expect(
+    screen
+      .getByRole("button", { name: "Apply appearance" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
+  const edited = history.present;
+  fireEvent.pointerDown(svg.querySelector('[data-measurement-vertex="1"]')!, {
+    button: 0,
+    pointerId: 7,
+    ...measurementPoint(1, 250, 250),
+  });
+  fireEvent.pointerMove(svg, {
+    buttons: 1,
+    pointerId: 7,
+    ...measurementPoint(1, 300, 300),
+  });
+  act(() => history.cancelSnapshotDrafts());
+  fireEvent.pointerUp(svg, { pointerId: 7, ...measurementPoint(1, 300, 300) });
+  expect(history.present).toBe(edited);
+  fireEvent.pointerDown(screen.getByLabelText("PDF page 1"), { button: 0 });
+  expect(screen.queryByLabelText("Measurement properties")).toBeNull();
+  fireEvent.keyDown(host, { key: "ArrowRight" });
+  expect(history.present).toBe(edited);
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(history.present).toBe(before);
+});
+
+it("adds and removes canvas marks with Shift-click, then clears the group on a result jump or background click", () => {
+  vi.spyOn(SVGElement.prototype, "getBoundingClientRect").mockImplementation(
+    function (this: SVGElement) {
+      return this.closest("[data-page]")!
+        .querySelector("canvas")!
+        .getBoundingClientRect();
+    },
+  );
+  const before = bulkFixture(),
+    history = new SessionHistory(before);
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  fireEvent.click(screen.getByRole("button", { name: "Select/Edit" }));
+  const canvas = screen.getByLabelText("PDF page 1"),
+    host = screen.getByRole("region", { name: "PDF pages" });
+  const box = canvas.getBoundingClientRect(),
+    scale = box.width / 600;
+  const hit = () =>
+    fireEvent.pointerDown(screen.getByLabelText("Highlights for page 1"), {
+      pointerId: 8,
+      button: 0,
+      shiftKey: true,
+      clientX: box.left + 150 * scale,
+      clientY: box.top + 600 * scale,
+    });
+  hit();
+  expect(screen.getByText("1 selected")).toBeDefined();
+  fireEvent.pointerDown(
+    screen
+      .getByLabelText("Shapes for page 1")
+      .querySelector('[data-shape-id="shape"]')!,
+    {
+      pointerId: 8,
+      button: 0,
+      shiftKey: true,
+      clientX: box.left + 100 * scale,
+      clientY: box.top + 450 * scale,
+    },
+  );
+  expect(screen.getByText("2 selected")).toBeDefined();
+  expect(document.activeElement).toBe(host);
+  expect(history.present).toBe(before);
+  hit();
+  expect(screen.getByText("1 selected")).toBeDefined();
+  hit();
+  fireEvent.click(screen.getByRole("button", { name: "Pages & markups" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Markups" }));
+  fireEvent.click(document.querySelector(".markup-jump")!);
+  expect(screen.getByText("1 selected")).toBeDefined();
+  expect(screen.queryByLabelText("Selection for page 1")).toBeNull();
+  fireEvent.pointerDown(canvas, { button: 0 });
+  expect(screen.queryByText("1 selected")).toBeNull();
+});
+
+it("copies a mixed selection to another page, preserves typing shortcuts, and pastes with one Undo step", () => {
+  const history = new SessionHistory(bulkFixture());
+  render(<PdfNavigationView pages={[page(1), page(2)]} history={history} />);
+  const boxes = selectBulkRows();
+  expect(screen.getByText("2 selected")).toBeDefined();
+  boxes[1].focus();
+  fireEvent.keyDown(boxes[1], { key: "c", ctrlKey: true });
+  expect(
+    screen.getByRole("button", { name: "Paste" }).hasAttribute("disabled"),
+  ).toBe(false);
+  const search = screen.getByRole("searchbox");
+  search.focus();
+  fireEvent.keyDown(search, { key: "v", ctrlKey: true });
+  expect(history.present.annotations).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+  const host = screen.getByRole("region", { name: "PDF pages" });
+  host.focus();
+  fireEvent.keyDown(host, { key: "v", ctrlKey: true });
+  expect(history.present.annotations).toHaveLength(2);
+  expect(history.present.shapes).toHaveLength(2);
+  expect(history.present.annotations[1].page).toBe(2);
+  expect(history.present.shapes![1].page).toBe(2);
+  expect(screen.getByLabelText("Selection for page 2")).toBeDefined();
+  expect(history.undoLabel).toBe("Paste markups");
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(history.present.annotations).toHaveLength(1);
+  expect(history.present.shapes).toHaveLength(1);
+  expect(screen.queryByText("2 selected")).toBeNull();
+  expect(history.undoLabel).toBeUndefined();
+  fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+  expect(history.present.annotations).toHaveLength(2);
+});
+
+it("nudges, assigns, duplicates and deletes a group atomically without panning or editing locked categories", () => {
+  const before = bulkFixture(),
+    history = new SessionHistory(before);
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  selectBulkRows();
+  const host = screen.getByRole("region", { name: "PDF pages" });
+  host.focus();
+  const scroll = host.scrollLeft;
+  fireEvent.keyDown(host, { key: "ArrowRight" });
+  expect(history.present.annotations[0].points[0].x).toBe(102);
+  expect(history.present.shapes![0].a.x).toBe(102);
+  expect(host.scrollLeft).toBe(scroll);
+  expect(history.undoLabel).toBe("Move selection");
+  fireEvent.keyDown(host, { code: "Space", key: " " });
+  expect(host.className).toContain("can-pan");
+  fireEvent.keyUp(host, { code: "Space", key: " " });
+  fireEvent.change(screen.getByLabelText("Selection category"), {
+    target: { value: "category:walls" },
+  });
+  expect(history.present.annotations[0].legendId).toBe("walls");
+  expect(history.present.objectCategories?.shape).toBe("walls");
+  fireEvent.keyDown(host, { key: "d", ctrlKey: true });
+  expect(history.present.annotations).toHaveLength(2);
+  expect(history.undoLabel).toBe("Duplicate markups");
+  fireEvent.keyDown(host, { key: "Delete" });
+  expect(history.present.annotations).toHaveLength(1);
+  expect(history.undoLabel).toBe("Delete selection");
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(history.present.annotations).toHaveLength(2);
+  fireEvent.click(screen.getByRole("button", { name: "Properties" }));
+  fireEvent.click(screen.getByRole("button", { name: "Legends (1)" }));
+  fireEvent.click(screen.getByRole("button", { name: "Lock category Walls" }));
+  expect(
+    Array.from(
+      document.querySelectorAll<HTMLInputElement>(".markup-select"),
+    ).every((b) => b.disabled),
+  ).toBe(true);
+  host.focus();
+  fireEvent.keyDown(host, { key: "a", ctrlKey: true });
+  expect(screen.queryByText("4 selected")).toBeNull();
+});
+
+it("moves from the group outline in one step and cancels unfinished drag on Save, Space and Undo", () => {
+  const history = new SessionHistory(bulkFixture());
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  selectBulkRows();
+  const overlay = () => screen.getByLabelText("Selection for page 1");
+  const begin = () => {
+    fireEvent.pointerDown(overlay().querySelector("rect:last-child")!, {
+      pointerId: 9,
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+    });
+    fireEvent.pointerMove(overlay(), {
+      pointerId: 9,
+      buttons: 1,
+      clientX: 127,
+      clientY: 100,
+    });
+  };
+  begin();
+  fireEvent.pointerUp(overlay(), { pointerId: 9, clientX: 127, clientY: 100 });
+  expect(history.present.annotations[0].points[0].x).toBeCloseTo(140);
+  expect(history.present.shapes![0].a.x).toBeCloseTo(140);
+  expect(history.undoLabel).toBe("Move selection");
+  const saved = history.present;
+  begin();
+  act(() => history.cancelSnapshotDrafts());
+  fireEvent.pointerUp(overlay(), { pointerId: 9, clientX: 150, clientY: 100 });
+  expect(history.present).toBe(saved);
+  begin();
+  fireEvent.keyDown(screen.getByRole("region", { name: "PDF pages" }), {
+    code: "Space",
+    key: " ",
+  });
+  fireEvent.keyUp(screen.getByRole("region", { name: "PDF pages" }), {
+    code: "Space",
+    key: " ",
+  });
+  fireEvent.pointerUp(overlay(), { pointerId: 9, clientX: 150, clientY: 100 });
+  expect(history.present).toBe(saved);
+  begin();
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(history.present.annotations[0].points[0].x).toBe(100);
+  expect(screen.queryByLabelText("Selection for page 1")).toBeNull();
+});
+
+it("hides categories only in the workspace and prevents locked canvas edits until explicitly unlocked", () => {
+  const stroke = {
+    id: "protected",
+    type: "freehand" as const,
+    page: 1,
+    legendId: "wall",
+    color: "#facc15",
+    opacity: 0.4,
+    width: 10,
+    points: [
+      { x: 100, y: 200 },
+      { x: 200, y: 200 },
+    ],
+  };
+  const history = new SessionHistory({
+    ...emptySession,
+    legends: [{ id: "wall", name: "Walls", color: "#facc15" }],
+    annotations: [stroke],
+  });
+  render(<PdfNavigationView pages={[page(1)]} history={history} />);
+  fireEvent.click(screen.getByRole("button", { name: "Legends (1)" }));
+  const overlay = screen.getByLabelText("Highlights for page 1");
+  expect(
+    overlay.querySelector('[data-annotation-id="protected"]'),
+  ).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Hide category Walls" }));
+  expect(overlay.querySelector('[data-annotation-id="protected"]')).toBeNull();
+  expect(history.present.annotations[0]).toBe(stroke);
+  fireEvent.click(screen.getByRole("button", { name: "Show category Walls" }));
+  expect(
+    overlay.querySelector('[data-annotation-id="protected"]'),
+  ).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Lock category Walls" }));
+  expect(
+    screen
+      .getByRole("button", { name: "Delete legend Walls" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Select/Edit" }));
+  fireEvent.pointerDown(overlay, {
+    pointerId: 8,
+    button: 0,
+    clientX: 299,
+    clientY: 550,
+  });
+  fireEvent.pointerMove(overlay, {
+    pointerId: 8,
+    buttons: 1,
+    clientX: 349,
+    clientY: 550,
+  });
+  fireEvent.pointerUp(overlay, { pointerId: 8 });
+  expect(history.present.annotations[0]).toBe(stroke);
+  const lockedSession = history.present;
+  history.apply({ type: "remove-stroke", id: "protected" });
+  expect(history.present).toBe(lockedSession);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Unlock category Walls" }),
+  );
+  expect(
+    screen
+      .getByRole("button", { name: "Delete legend Walls" })
+      .hasAttribute("disabled"),
+  ).toBe(false);
+  expect(history.apply({ type: "remove-stroke", id: "protected" })).toBe(true);
+});
+
+it("restores page/zoom/center and flushes the latest view before a save snapshot", () => {
+  const history = new SessionHistory(emptySession),
+    onNavigation = vi.fn();
+  const navigation = {
+    bookmarks: [{ page: 2, label: "Ground floor" }],
+    view: {
+      page: 2,
+      mode: "manual" as const,
+      zoom: 2,
+      center: { x: 300, y: 400 },
+    },
+  };
+  render(
+    <PdfNavigationView
+      pages={[page(1), page(2)]}
+      history={history}
+      navigation={navigation}
+      onNavigation={onNavigation}
+    />,
+  );
+  expect((screen.getByLabelText("Page number") as HTMLInputElement).value).toBe(
+    "2",
+  );
+  expect(
+    (screen.getByLabelText("PDF page 2") as HTMLCanvasElement).style.height,
+  ).toBe("1600px");
+  act(() => history.cancelSnapshotDrafts());
+  expect(onNavigation).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      bookmarks: navigation.bookmarks,
+      view: expect.objectContaining({
+        page: 2,
+        zoom: 2,
+        center: navigation.view.center,
+      }),
+    }),
+  );
+  expect(history.undoLabel).toBeUndefined();
+});
+
+it("reveals an off-page markup, transfers focus and nudges the selected highlight with arrows", () => {
+  const stroke = {
+    id: "off-page",
+    type: "freehand" as const,
+    page: 2,
+    legendId: null,
+    color: "#facc15",
+    opacity: 0.4,
+    width: 10,
+    points: [
+      { x: 100, y: 200 },
+      { x: 200, y: 200 },
+    ],
+  };
+  const history = new SessionHistory({
+    ...emptySession,
+    annotations: [stroke],
+  });
+  render(<PdfNavigationView pages={[page(1), page(2)]} history={history} />);
+  fireEvent.click(screen.getByRole("button", { name: "Pages & markups" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Markups" }));
+  fireEvent.click(document.querySelector(".markup-jump")!);
+  const host = screen.getByRole("region", { name: "PDF pages" });
+  expect(document.activeElement).toBe(host);
+  expect((screen.getByLabelText("Page number") as HTMLInputElement).value).toBe(
+    "2",
+  );
+  expect(history.undoLabel).toBeUndefined();
+  fireEvent.keyDown(host, { key: "ArrowRight" });
+  expect(history.present.annotations[0].points[0].x).toBe(102);
+  expect(history.undoLabel).toBe("Move stroke");
+  fireEvent.keyDown(host, { code: "Space" });
+  expect(host.className).toContain("can-pan");
+  fireEvent.keyUp(host, { code: "Space" });
+});
 
 let width = 800,
   height = 600;

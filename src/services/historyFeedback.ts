@@ -78,6 +78,14 @@ export function historyChangeRegions(
   compare(before.shapes ?? [], after.shapes ?? [], (shape) =>
     add(shape.page, [shape.a, shape.b], shape.width / 2 + 4),
   );
+  compare(before.measurements ?? [], after.measurements ?? [], (m) =>
+    add(m.page, m.points),
+  );
+  const previous = new Map(before.calibrations?.map((c) => [c.page, c]));
+  const next = new Map(after.calibrations?.map((c) => [c.page, c]));
+  for (const m of after.measurements ?? [])
+    if (!sameSession(previous.get(m.page), next.get(m.page)))
+      add(m.page, m.points);
   compare(before.notes ?? [], after.notes ?? [], (note) => {
     if (note.type === "arrow") add(note.page, [note.a, note.b], note.head + 4);
     else

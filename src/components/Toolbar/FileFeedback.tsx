@@ -1,5 +1,9 @@
 import { useEffect } from "react";
-export type FileResult = { id: number; kind: "save" | "export"; path: string };
+export type FileResult = {
+  id: number;
+  kind: "save" | "export" | "report";
+  path: string;
+};
 
 export default function FileFeedback({
   result,
@@ -19,7 +23,11 @@ export default function FileFeedback({
       </span>
       <div>
         <strong>
-          {result.kind === "save" ? "Project saved" : "PDF exported"}
+          {result.kind === "save"
+            ? "Project saved"
+            : result.kind === "report"
+              ? "Report exported"
+              : "PDF exported"}
         </strong>
         <span title={result.path}>{result.path.split(/[\\/]/).pop()}</span>
       </div>

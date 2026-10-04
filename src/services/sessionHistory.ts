@@ -11,6 +11,14 @@ type Transaction = {
   label: string;
 };
 const labels: Record<SessionAction["type"], string> = {
+  "tool-styles": "Drawing tool styles",
+  "category-preset": "Add preset categories",
+  bulk: "Edit selection",
+  "calibrate-page": "Calibrate page",
+  "put-measurement": "Draw/edit measurement",
+  "remove-measurement": "Delete measurement",
+  "category-settings": "Category visibility/locking",
+  "assign-category": "Assign category",
   "put-note": "Create/edit note or arrow",
   "remove-note": "Delete note or arrow",
   "put-shape": "Draw/edit shape",
@@ -89,7 +97,11 @@ export class SessionHistory {
     if (sameSession(this.present, after)) return false;
     this.past = [
       ...this.past.slice(-(HISTORY_LIMIT - 1)),
-      { before: this.present, after, label: labels[action.type] },
+      {
+        before: this.present,
+        after,
+        label: action.type === "bulk" ? action.label : labels[action.type],
+      },
     ];
     this.future = [];
     this.present = after;

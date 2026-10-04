@@ -7,6 +7,7 @@ import {
   generateInWorker,
 } from "../src/services/exportService";
 import { emptySession } from "../src/services/annotationSession";
+import { defaultExportSelection } from "../src/services/exportSelection";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
 const source = {
@@ -16,6 +17,61 @@ const source = {
   size: 10,
   pages: 1,
 };
+
+it("rejects invalid selections before file dialogs or reads and snapshots validated choices into the worker", async () => {
+  const invalid = { ...defaultExportSelection(1), pages: [2] };
+  await expect(
+    exportPdf(
+      source.reference,
+      null,
+      source,
+      emptySession,
+      new AbortController().signal,
+      undefined,
+      invalid,
+    ),
+  ).rejects.toThrow("Invalid export selection");
+  expect(save).not.toHaveBeenCalled();
+  expect(invoke).not.toHaveBeenCalled();
+  const post = vi.fn();
+  vi.stubGlobal(
+    "Worker",
+    class {
+      onmessage: ((e: unknown) => void) | null = null;
+      onerror = null;
+      terminate = vi.fn();
+      postMessage(value: unknown) {
+        post(value);
+        queueMicrotask(() =>
+          this.onmessage?.({
+            data: { bytes: new Uint8Array([37, 80, 68, 70]) },
+          }),
+        );
+      }
+    },
+  );
+  vi.mocked(save).mockResolvedValue("C:/selected.pdf");
+  vi.mocked(invoke)
+    .mockResolvedValueOnce(new Uint8Array([1, 2]).buffer)
+    .mockResolvedValueOnce(undefined);
+  const selection = { ...defaultExportSelection(1), categoryIds: [] };
+  await exportPdf(
+    source.reference,
+    null,
+    source,
+    emptySession,
+    new AbortController().signal,
+    undefined,
+    selection,
+  );
+  expect(post.mock.calls[0][0]).toMatchObject({ selection });
+  expect(post.mock.calls[0][0].selection).not.toBe(selection);
+  expect(invoke).toHaveBeenLastCalledWith(
+    "write_export",
+    expect.any(Uint8Array),
+    expect.any(Object),
+  );
+});
 afterEach(() => {
   vi.resetAllMocks();
   vi.unstubAllGlobals();
@@ -78,6 +134,81 @@ it("native save cancellation does not read or generate output", async () => {
   expect(save).toHaveBeenCalledWith(
     expect.objectContaining({ defaultPath: "source_Marked.pdf" }),
   );
+});
+it("selected print uses the same canonical page policy as export", async () => {
+  const post = vi.fn();
+  vi.stubGlobal(
+    "Worker",
+    class {
+      onmessage: ((e: unknown) => void) | null = null;
+      onerror = null;
+      terminate = vi.fn();
+      postMessage(data: unknown) {
+        post(data);
+        queueMicrotask(() =>
+          this.onmessage?.({
+            data: { bytes: new Uint8Array([37, 80, 68, 70]) },
+          }),
+        );
+      }
+    },
+  );
+  vi.mocked(invoke)
+    .mockResolvedValueOnce(new Uint8Array([1]).buffer)
+    .mockResolvedValueOnce(undefined);
+  const selection = {
+    ...defaultExportSelection(2),
+    pages: [2],
+    includeHidden: false,
+  };
+  await printPdf(
+    source.reference,
+    { ...source, pages: 2 },
+    emptySession,
+    new AbortController().signal,
+    undefined,
+    selection,
+  );
+  expect(post).toHaveBeenCalledWith(expect.objectContaining({ selection }));
+  expect(save).not.toHaveBeenCalled();
+  expect(invoke).toHaveBeenLastCalledWith(
+    "print_annotated_pdf",
+    expect.any(Uint8Array),
+    expect.any(Object),
+  );
+});
+it("a late abort after native atomic save acknowledges the saved PDF", async () => {
+  const controller = new AbortController();
+  vi.stubGlobal(
+    "Worker",
+    class {
+      onmessage: ((e: unknown) => void) | null = null;
+      onerror = null;
+      terminate = vi.fn();
+      postMessage() {
+        queueMicrotask(() =>
+          this.onmessage?.({
+            data: { bytes: new Uint8Array([37, 80, 68, 70]) },
+          }),
+        );
+      }
+    },
+  );
+  vi.mocked(save).mockResolvedValue("C:/completed.pdf");
+  vi.mocked(invoke)
+    .mockResolvedValueOnce(new Uint8Array([1]).buffer)
+    .mockImplementationOnce(async () => {
+      controller.abort();
+    });
+  expect(
+    await exportPdf(
+      source.reference,
+      null,
+      source,
+      emptySession,
+      controller.signal,
+    ),
+  ).toBe("C:/completed.pdf");
 });
 it("source identity read failure stops before worker/write", async () => {
   vi.mocked(save).mockResolvedValue("C:/marked.pdf");

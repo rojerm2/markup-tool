@@ -98,7 +98,7 @@ fn checked_destination(path: &Path, source: &Path) -> Result<PathBuf, String> {
     }
     Ok(target)
 }
-fn atomic_write(
+pub(crate) fn atomic_write(
     path: &Path,
     bytes: &[u8],
     before_replace: impl FnOnce() -> Result<(), String>,
@@ -135,13 +135,7 @@ fn save_file(path: &Path, source: &Path, text: &str) -> Result<(), String> {
         return Err("Project exceeds 16 MiB".into());
     }
     let target = checked_destination(path, source)?;
-    let mut value: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
-    if value["format"] != "pdf-markup-project"
-        || (value["version"] != 1 && value["version"] != 2)
-        || !value["source"].is_object()
-    {
-        return Err("Invalid project envelope".into());
-    }
+    let mut value = crate::portable::envelope(text)?;
     let source = source.canonicalize().map_err(|e| e.to_string())?;
     // Portable within the project directory; otherwise absolute (including other drives).
     let reference = source
@@ -269,18 +263,28 @@ fn export_destination(
     source: &Path,
     project: Option<&Path>,
 ) -> Result<PathBuf, String> {
+    protected_destination(path, source, project, "pdf")
+}
+pub(crate) fn protected_destination(
+    path: &Path,
+    source: &Path,
+    project: Option<&Path>,
+    extension: &str,
+) -> Result<PathBuf, String> {
     if !path.is_absolute()
         || path
             .extension()
             .and_then(|x| x.to_str())
-            .map(|x| x.eq_ignore_ascii_case("pdf"))
+            .map(|x| x.eq_ignore_ascii_case(extension))
             != Some(true)
         || path
             .file_name()
             .and_then(|x| x.to_str())
             .is_none_or(|x| x.contains(':'))
     {
-        return Err("Choose an absolute destination with the .pdf extension".into());
+        return Err(format!(
+            "Choose an absolute destination with the .{extension} extension"
+        ));
     }
     let target = path
         .parent()
@@ -706,7 +710,7 @@ mod tests {
         assert_eq!(fs::read(disguised).unwrap(), bytes);
     }
     #[test]
-    fn supported_v2_replacement_preserves_source_and_rejects_future_versions() {
+    fn supported_project_replacement_preserves_source_and_rejects_future_versions() {
         let dir = tempfile::tempdir().unwrap();
         let source = dir.path().join("source.pdf");
         let target = dir.path().join("work.pmarkup");
@@ -715,16 +719,19 @@ mod tests {
         let v2 = project().replace("\"version\":1", "\"version\":2");
         save_file(&target, &source, &v2).unwrap();
         save_file(&target, &source, &v2).unwrap();
+        let v3 = v2.replace("\"version\":2", "\"version\":3");
+        save_file(&target, &source, &v3).unwrap();
+        save_file(&target, &source, &v3).unwrap();
         let saved = fs::read(&target).unwrap();
         assert!(save_file(
             &target,
             &source,
-            &v2.replace("\"version\":2", "\"version\":3")
+            &v2.replace("\"version\":2", "\"version\":99")
         )
         .is_err());
         assert_eq!(fs::read(&target).unwrap(), saved);
         assert_eq!(fs::read(&source).unwrap(), b"%PDF-original");
-        fs::write(&target, v2.replace("\"version\":2", "\"version\":3")).unwrap();
+        fs::write(&target, v2.replace("\"version\":2", "\"version\":99")).unwrap();
         assert!(save_file(&target, &source, &v2).is_err());
     }
 }

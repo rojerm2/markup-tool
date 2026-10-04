@@ -46,6 +46,15 @@ import {
   writeProject,
 } from "./services/projectService";
 import { exportPdf, printPdf } from "./services/exportService";
+import { exportReport } from "./services/reportService";
+import {
+  defaultExportSelection,
+  type ExportSelection,
+} from "./services/exportSelection";
+import ExportOptions, {
+  type ExportAction,
+} from "./components/Toolbar/ExportOptions";
+import RevisionComparison from "./components/PdfViewer/RevisionComparison";
 import { SessionHistory } from "./services/sessionHistory";
 import type { PDFPageProxy } from "pdfjs-dist";
 import {
@@ -56,6 +65,23 @@ import {
   type RecentFile,
 } from "./services/recentFiles";
 import RecentFilesMenu from "./components/Toolbar/RecentFilesMenu";
+import RecoveryPanel from "./components/Toolbar/RecoveryPanel";
+import {
+  defaultNavigation,
+  navigationKey,
+  parseNavigation,
+  readNavigation,
+  writeNavigation,
+  type DocumentNavigation,
+} from "./services/documentNavigation";
+import {
+  RecoveryJournal,
+  listRecovery,
+  readRecovery,
+  deleteRecovery,
+  type RecoveryEntry,
+  type RecoveryState,
+} from "./services/recoveryService";
 
 type Work = {
   id: number;
@@ -66,7 +92,10 @@ type Work = {
   history: SessionHistory;
   session: AnnotationSession;
   saved: string;
+  navigation: DocumentNavigation;
+  savedBookmarks: string;
   controller: AbortController;
+  recovery: RecoveryJournal;
 };
 type Choice = "save" | "discard" | "cancel";
 
@@ -114,6 +143,9 @@ function AppContent() {
   const [sounds, setSounds] = useState(readSoundsEnabled);
   const [volume, setVolume] = useState(readSoundVolume);
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
+  const [recoveries, setRecoveries] = useState<RecoveryEntry[]>([]);
+  const [recoveryStatus, setRecoveryStatus] = useState<RecoveryState>("idle");
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const appRoot = useRef<HTMLElement>(null);
   const preferences = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
@@ -175,14 +207,100 @@ function AppContent() {
   const [error, setError] = useState<string | null>(null),
     [notice, setNotice] = useState<string | null>(null);
   const [exportProgress, setExportProgress] = useState("Exporting…");
+  const [exportOptions, setExportOptions] = useState(false);
+  const [comparisonOpen, setComparisonOpen] = useState(false);
+  const comparisonButton = useRef<HTMLButtonElement>(null);
+  const operationController = useRef<AbortController | null>(null);
+  const [operationStarted, setOperationStarted] = useState<number | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [cancelRequested, setCancelRequested] = useState(false);
+  const exportOptionsButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (operationStarted === null) return;
+    const timer = setInterval(
+      () => setElapsed(Math.floor((Date.now() - operationStarted) / 1000)),
+      1000,
+    );
+    return () => clearInterval(timer);
+  }, [operationStarted]);
   const [question, setQuestion] = useState(false);
   const pending = useRef<((choice: Choice) => void) | null>(null);
+  const sessionKeys = useRef<{
+    session: AnnotationSession;
+    key: string;
+  } | null>(null);
+
+  function sessionKey(session: AnnotationSession) {
+    if (sessionKeys.current?.session !== session) {
+      sessionKeys.current = { session, key: JSON.stringify(session) };
+    }
+    return sessionKeys.current.key;
+  }
   const dirty = (value: Work | null) =>
-    !!value && JSON.stringify(value.session) !== value.saved;
+    !!value &&
+    (sessionKey(value.session) !== value.saved ||
+      JSON.stringify(value.navigation.bookmarks) !== value.savedBookmarks);
+
+  useEffect(() => {
+    let current = true;
+    void listRecovery()
+      .then((entries) => {
+        if (current) setRecoveries(entries);
+      })
+      .catch((error) => {
+        if (current)
+          setRecoveryError(`Recovery list unavailable: ${String(error)}`);
+      });
+    return () => {
+      current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!work) return;
+    if (dirty(work)) work.recovery.schedule(work);
+    else void work.recovery.clear();
+  }, [
+    work?.id,
+    work?.session,
+    work?.navigation.bookmarks,
+    work?.saved,
+    work?.savedBookmarks,
+    work?.projectPath,
+  ]);
+
+  function journal(workId: number, recoveryId: string | null = null) {
+    return new RecoveryJournal(recoveryId, (state, error) => {
+      if (alive.current && live.current?.id === workId) {
+        setRecoveryStatus(state);
+        setRecoveryError(error ?? null);
+      }
+    });
+  }
 
   function publish(value: Work) {
     live.current = value;
     setWork(value);
+  }
+
+  function updateNavigation(value: DocumentNavigation, workId: number) {
+    const current = live.current;
+    if (!current || current.id !== workId || !alive.current) return;
+    const navigation = parseNavigation(value, current.pages.length);
+    const sameBookmarks =
+      JSON.stringify(navigation.bookmarks) ===
+      JSON.stringify(current.navigation.bookmarks);
+    if (replacing.current && !sameBookmarks) return;
+    if (sameBookmarks) navigation.bookmarks = current.navigation.bookmarks;
+    if (JSON.stringify(navigation) === JSON.stringify(current.navigation))
+      return;
+    current.recovery.amendNavigation(navigation);
+    writeNavigation(
+      navigationKey(current.source.sha256, current.projectPath),
+      { bookmarks: [], view: navigation.view },
+      current.pages.length,
+    );
+    publish({ ...current, navigation });
   }
 
   async function remember(path: string) {
@@ -223,11 +341,16 @@ function AppContent() {
   }
 
   async function saveCurrent(as = false): Promise<boolean> {
+    live.current?.history.cancelSnapshotDrafts();
     const snapshot = live.current;
     if (!snapshot) return false;
-    snapshot.history.cancelSnapshotDrafts();
-    const serialized = serializeProject(snapshot.source, snapshot.session);
-    const saved = JSON.stringify(snapshot.session);
+    const serialized = serializeProject(
+      snapshot.source,
+      snapshot.session,
+      snapshot.navigation,
+    );
+    const saved = sessionKey(snapshot.session);
+    const savedBookmarks = JSON.stringify(snapshot.navigation.bookmarks);
     const path = await writeProject(
       as ? null : snapshot.projectPath,
       snapshot.sourcePath,
@@ -235,7 +358,13 @@ function AppContent() {
     );
     if (!path || !alive.current || live.current?.id !== snapshot.id)
       return false;
-    publish({ ...live.current, projectPath: path, saved });
+    publish({ ...live.current, projectPath: path, saved, savedBookmarks });
+    writeNavigation(
+      navigationKey(snapshot.source.sha256, path),
+      { bookmarks: [], view: live.current!.navigation.view },
+      snapshot.pages.length,
+    );
+    if (!dirty(live.current)) await snapshot.recovery.clear();
     await remember(path);
     setFileResult({ id: ++fileResultId.current, kind: "save", path });
     playActionSound("success");
@@ -243,13 +372,21 @@ function AppContent() {
   }
 
   async function guard() {
-    if (!dirty(live.current)) return true;
+    live.current?.history.cancelSnapshotDrafts();
+    if (!dirty(live.current)) {
+      await live.current?.recovery.clear();
+      return true;
+    }
     setQuestion(true);
     const choice = await new Promise<Choice>((resolve) => {
       pending.current = resolve;
     });
     if (choice === "cancel") return false;
-    return choice === "discard" || (await saveCurrent());
+    if (choice === "discard") {
+      await live.current?.recovery.clear();
+      return true;
+    }
+    return await saveCurrent();
   }
 
   async function run(
@@ -268,6 +405,15 @@ function AppContent() {
       await task();
     } catch (err) {
       if (alive.current) {
+        if (
+          err &&
+          typeof err === "object" &&
+          "name" in err &&
+          err.name === "AbortError"
+        ) {
+          setNotice("Cancelled. No output file was saved.");
+          return;
+        }
         playActionSound("error");
         setError(
           `${err instanceof Error ? err.message : String(err)} Please retry or choose another file.`,
@@ -278,27 +424,60 @@ function AppContent() {
       replacing.current = false;
       if (alive.current) {
         setOperation(null);
+        operationController.current = null;
+        setOperationStarted(null);
+        if (kind === "opening" && live.current && dirty(live.current))
+          live.current.recovery.schedule(live.current);
         if (kind !== "exporting" && kind !== "printing") setNotice(null);
       }
     }
   }
 
-  async function exportCurrent() {
+  async function exportCurrent(
+    options?: ExportSelection,
+    action: ExportAction = "pdf",
+  ) {
     await run("exporting", async () => {
       const snapshot = live.current;
       if (!snapshot) return;
       snapshot.history.invalidate();
-      setExportProgress("Choosing destination…");
-      const path = await exportPdf(
-        snapshot.sourcePath,
-        snapshot.projectPath,
-        snapshot.source,
-        snapshot.session,
+      const controller = new AbortController();
+      operationController.current = controller;
+      setCancelRequested(false);
+      setElapsed(0);
+      setOperationStarted(Date.now());
+      const signal = AbortSignal.any([
+        controller.signal,
         snapshot.controller.signal,
-        setExportProgress,
-      );
+      ]);
+      setExportProgress("Choosing destination…");
+      const path =
+        action === "csv-report" || action === "pdf-report"
+          ? await exportReport(
+              snapshot.sourcePath,
+              snapshot.projectPath,
+              snapshot.source,
+              snapshot.session,
+              options ?? defaultExportSelection(snapshot.source.pages),
+              action === "csv-report" ? "csv" : "pdf",
+              signal,
+              setExportProgress,
+            )
+          : await exportPdf(
+              snapshot.sourcePath,
+              snapshot.projectPath,
+              snapshot.source,
+              snapshot.session,
+              signal,
+              setExportProgress,
+              options,
+            );
       if (path && alive.current && live.current?.id === snapshot.id) {
-        setFileResult({ id: ++fileResultId.current, kind: "export", path });
+        setFileResult({
+          id: ++fileResultId.current,
+          kind: action === "pdf" ? "export" : "report",
+          path,
+        });
         setNotice(
           `Exported ${path.split(/[\\/]/).pop()}. Editable project unchanged.`,
         );
@@ -307,18 +486,24 @@ function AppContent() {
     });
   }
 
-  async function printCurrent() {
+  async function printCurrent(options?: ExportSelection) {
     await run("printing", async () => {
       const snapshot = live.current;
       if (!snapshot) return;
       snapshot.history.cancelSnapshotDrafts();
+      const controller = new AbortController();
+      operationController.current = controller;
+      setCancelRequested(false);
+      setElapsed(0);
+      setOperationStarted(Date.now());
       setExportProgress("Preparing print…");
       await printPdf(
         snapshot.sourcePath,
         snapshot.source,
         snapshot.session,
-        snapshot.controller.signal,
+        AbortSignal.any([controller.signal, snapshot.controller.signal]),
         setExportProgress,
+        options,
       );
       if (alive.current)
         setNotice(
@@ -328,6 +513,12 @@ function AppContent() {
   }
   const shortcuts = useRef<(e: KeyboardEvent) => void>(() => {});
   shortcuts.current = (e) => {
+    if (document.querySelector("dialog[open]")) return;
+    if (
+      e.target instanceof Element &&
+      e.target.closest('dialog, [role="dialog"], [role="alertdialog"]')
+    )
+      return;
     if ((e.ctrlKey || e.metaKey) && ["p", "s"].includes(e.key.toLowerCase())) {
       e.preventDefault();
       if (!locked.current && live.current) {
@@ -389,9 +580,19 @@ function AppContent() {
         if (!alive.current || controller.signal.aborted) return;
         const session =
           selected?.project.session ?? structuredClone(emptySession);
+        const navigation = selected?.project.navigation ?? defaultNavigation();
+        const lastView = readNavigation(
+          navigationKey(loaded.source.sha256, selected?.path ?? null),
+          loaded.pages.length,
+        );
+        const restoredNavigation = {
+          ...navigation,
+          view: lastView?.view ?? navigation.view,
+        };
         const previous = live.current;
+        const workId = ++counter.current;
         publish({
-          id: ++counter.current,
+          id: workId,
           sourcePath: path,
           projectPath: selected?.path ?? null,
           ...loaded,
@@ -402,13 +603,66 @@ function AppContent() {
           },
           session,
           history: new SessionHistory(session),
-          saved: JSON.stringify(session),
+          saved: sessionKey(session),
+          navigation: restoredNavigation,
+          savedBookmarks: JSON.stringify(restoredNavigation.bookmarks),
           controller,
+          recovery: journal(workId),
         });
+        setRecoveryStatus("idle");
+        setRecoveryError(null);
+        previous?.recovery.dispose();
         staging.current = null;
         playActionSound("success");
         previous?.controller.abort();
         await remember(selected?.path ?? path);
+      } finally {
+        if (staging.current === controller) {
+          controller.abort();
+          staging.current = null;
+        }
+      }
+    });
+  }
+
+  async function recoverWork(entry: RecoveryEntry) {
+    await run("opening", async () => {
+      if (!(await guard()) || !alive.current) return;
+      const restored = await readRecovery(entry.id);
+      const controller = new AbortController();
+      staging.current = controller;
+      try {
+        const loaded = await loadSource(restored.sourcePath, controller.signal);
+        if (!sameSource(restored.project.source, loaded.source))
+          throw new Error("Recovery source identity mismatch");
+        if (!alive.current || controller.signal.aborted) return;
+        const previous = live.current;
+        const workId = ++counter.current;
+        const session = restored.project.session;
+        publish({
+          id: workId,
+          sourcePath: restored.sourcePath,
+          projectPath: null,
+          ...loaded,
+          source: {
+            ...loaded.source,
+            filename: restored.project.source.filename,
+          },
+          history: new SessionHistory(session),
+          session,
+          saved: "",
+          navigation: restored.project.navigation ?? defaultNavigation(),
+          savedBookmarks: "",
+          controller,
+          recovery: journal(workId, entry.id),
+        });
+        staging.current = null;
+        setRecoveryStatus("protected");
+        setRecoveryError(null);
+        setRecoveries((entries) => entries.filter((v) => v.id !== entry.id));
+        previous?.recovery.dispose();
+        previous?.controller.abort();
+        playActionSound("success");
       } finally {
         if (staging.current === controller) {
           controller.abort();
@@ -454,6 +708,7 @@ function AppContent() {
       window.removeEventListener("beforeunload", beforeUnload);
       staging.current?.abort();
       live.current?.controller.abort();
+      live.current?.recovery.dispose();
       pending.current?.("cancel");
       pending.current = null;
     };
@@ -559,6 +814,28 @@ function AppContent() {
           >
             Print
           </button>
+          <button
+            ref={exportOptionsButton}
+            disabled={!work || !!operation}
+            onClick={() => {
+              live.current?.history.cancelSnapshotDrafts();
+              live.current?.history.invalidate();
+              setExportOptions(true);
+            }}
+          >
+            Export options…
+          </button>
+          <button
+            ref={comparisonButton}
+            disabled={!!operation}
+            onClick={() => {
+              live.current?.history.cancelSnapshotDrafts();
+              live.current?.history.invalidate();
+              setComparisonOpen(true);
+            }}
+          >
+            Compare PDFs…
+          </button>
         </div>
         <details ref={preferences} className="ui-preferences">
           <summary>Preferences</summary>
@@ -635,7 +912,83 @@ function AppContent() {
         {operation &&
           ` · ${operation === "exporting" || operation === "printing" ? exportProgress : operation === "saving" ? "Saving…" : operation === "opening" ? "Opening…" : "Closing…"}`}
         {!operation && notice && ` | ${notice}`}
+        {work && recoveryStatus === "protected" && " · Recovery up to date"}
+        {work && recoveryStatus === "writing" && " · Updating recovery…"}
       </p>
+      {(operation === "exporting" || operation === "printing") &&
+        operationStarted !== null && (
+          <div className="export-operation" role="status">
+            <span>
+              {exportProgress} · {elapsed}s elapsed
+            </span>
+            <button
+              disabled={
+                cancelRequested ||
+                [
+                  "Choosing destination…",
+                  "Saving PDF…",
+                  "Saving report…",
+                  "Opening print preview…",
+                ].includes(exportProgress)
+              }
+              onClick={() => {
+                setCancelRequested(true);
+                operationController.current?.abort();
+              }}
+            >
+              {cancelRequested ? "Cancelling…" : "Cancel"}
+            </button>
+          </div>
+        )}
+      {exportOptions && work && (
+        <ExportOptions
+          session={work.session}
+          pageCount={work.source.pages}
+          currentPage={work.navigation.view.page}
+          onClose={() => {
+            setExportOptions(false);
+            exportOptionsButton.current?.focus();
+          }}
+          onExport={(selection, action) => {
+            setExportOptions(false);
+            exportOptionsButton.current?.focus();
+            if (action === "print") void printCurrent(selection);
+            else void exportCurrent(selection, action);
+          }}
+        />
+      )}
+      {comparisonOpen && (
+        <RevisionComparison
+          baseline={
+            work
+              ? {
+                  source: work.source,
+                  pages: work.pages,
+                  path: work.projectPath ?? work.sourcePath,
+                }
+              : undefined
+          }
+          initialPage={work?.navigation.view.page ?? 1}
+          onClose={() => {
+            setComparisonOpen(false);
+            comparisonButton.current?.focus();
+          }}
+        />
+      )}
+      <RecoveryPanel
+        entries={recoveries}
+        disabled={!!operation}
+        recover={(entry) => void recoverWork(entry)}
+        dismiss={(entry) =>
+          void run("saving", async () => {
+            await deleteRecovery(entry.id);
+            if (alive.current)
+              setRecoveries((entries) =>
+                entries.filter((v) => v.id !== entry.id),
+              );
+          })
+        }
+      />
       {work && (
         <div className="document-location" aria-label="Current file">
           <strong>
@@ -649,6 +1002,11 @@ function AppContent() {
       {error && (
         <p role="alert" className="project-error">
           {error}
+        </p>
+      )}
+      {recoveryError && (
+        <p role="alert" className="project-error">
+          {recoveryError}
         </p>
       )}
       {operation && notice && (
@@ -667,12 +1025,19 @@ function AppContent() {
             key={work.id}
             pages={work.pages}
             session={work.session}
+            navigation={work.navigation}
+            onNavigation={(navigation) => updateNavigation(navigation, work.id)}
             history={work.history}
             onHistory={traverse}
             onAction={(action, generation) =>
               mutate(action, generation, work.id)
             }
-            disabled={operation === "opening" || operation === "closing"}
+            disabled={
+              operation === "opening" ||
+              operation === "closing" ||
+              comparisonOpen ||
+              exportOptions
+            }
           />
         ) : (
           <section className="empty-document">

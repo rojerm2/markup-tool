@@ -30,12 +30,13 @@ type Props = {
   legendId?: string | null;
   tool?: "highlight" | "edit";
   selectedId?: string | null;
-  onSelect?: (id: string | null) => void;
+  onSelect?: (id: string | null, additive?: boolean) => void;
   onAction?: (action: SessionAction, generation?: number) => void;
   legends?: Legend[];
   disabled?: boolean;
   viewRevision?: number;
   history?: SessionHistory;
+  locked?: (id: string) => boolean;
 };
 const NO_LEGENDS: Legend[] = [];
 
@@ -54,6 +55,7 @@ export default function AnnotationOverlay({
   disabled = false,
   viewRevision = 0,
   history,
+  locked = () => false,
 }: Props) {
   const svg = useRef<SVGSVGElement>(null);
   const currentViewport = useRef(viewport);
@@ -240,10 +242,12 @@ export default function AnnotationOverlay({
             event.currentTarget.getBoundingClientRect(),
             viewport,
           );
-          onSelect?.(hit?.id ?? null);
+          if (hit && locked(hit.id)) return;
+          onSelect?.(hit?.id ?? null, event.shiftKey);
           event.currentTarget
             .closest<HTMLElement>(".pdf-scroll")
             ?.focus({ preventScroll: true });
+          if (event.shiftKey) return;
           if (hit) {
             event.currentTarget.setPointerCapture(event.pointerId);
             move.current = {

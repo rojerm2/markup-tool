@@ -2,6 +2,45 @@
 
 Versioned changes follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [0.4.0] - 2026-10-04
+
+### Added
+
+- Read-only PDF revision comparison with synchronized side-by-side views,
+  blue/red color overlays, explicit page pairing and manual sheet alignment.
+  Bounded overview and visible-detail rendering support large sheets and zoom.
+- Optional page/category export and selected-page printing, cancellable worker
+  processing, elapsed time and explicit processing/save stages.
+- CSV and paginated PDF markup reports with source/export page mapping,
+  annotation text, counts and unit/calibration-separated measurement totals;
+  formula-safe CSV text and protected atomic report saving.
+
+- Local reusable drawing presets, category sets and original symbol groups;
+  portable bounded `.pmpreset` import/export, previews, explicit replacement,
+  conflict-safe category mapping and atomic undo for applying and placing.
+- Portable, undoable shape and measurement drawing defaults.
+
+- Debounced local crash checkpoints and startup recovery of unsaved projects,
+  including a verified PDF snapshot without repeated large-file copies.
+- Bounded recovery retention, automatic checkpoint retries, and cleanup after
+  Save, Discard and interrupted writes.
+- Corresponding font source and provenance checks in build/distribution assets.
+- Repeatable Windows Rust dependency audits using a checksum-verified tool;
+  development dependencies are included in npm security checks.
+- Collapsible Pages, Bookmarks and searchable Markups navigation, with bounded
+  thumbnail previews and direct selection of off-page annotations.
+- Project bookmarks and restored page, zoom and PDF-space view position without
+  adding navigation steps to annotation undo history.
+- Undoable category visibility and locking, enforced by the annotation state
+  layer and preserved in version 3 projects.
+- Mixed-markup selection with Shift-click and list checkboxes; group movement,
+  category assignment, duplicate, copy/paste across pages and atomic undo/redo.
+- Per-page distance calibration and length, polygon area and perimeter tools;
+  editable measurement vertices, matching vector export/print labels and version
+  4 project storage. Uncalibrated values are identified explicitly.
+
 ## [0.3.0] - 2026-10-04
 
 ### Added
@@ -29,5 +68,6 @@ Earlier commits contain the development history for portable projects,
 highlighter/shapes/text editing, large-PDF export, focus handling,
 undo/redo, dark mode, zoom, sounds, and recent files.
 
+[0.4.0]: https://github.com/rojerm2/markup-tool/releases/tag/v0.4.0
 [0.3.0]: https://github.com/rojerm2/markup-tool/releases/tag/v0.3.0
 [0.2.6]: https://github.com/rojerm2/markup-tool/commit/b14aa6b

@@ -363,6 +363,87 @@ dialog {
 dialog::backdrop {
   background: #0f172a66;
 }
+.preset-library {
+  margin: auto;
+  width: min(800px, 92vw);
+  max-width: min(800px, 92vw);
+  max-height: 88vh;
+  overflow: auto;
+}
+.preset-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.preset-library fieldset {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+.preset-columns {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) minmax(250px, 1.5fr);
+  gap: 24px;
+}
+.preset-columns section {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  min-width: 0;
+}
+.preset-columns label:not(.preset-check) {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.preset-check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.preset-library h3,
+.preset-library p {
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+.preset-style-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+.preset-category-list {
+  max-height: 160px;
+  overflow: auto;
+  list-style: none;
+  padding: 0;
+}
+.preset-category-list i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 8px;
+  border: 1px solid var(--divider);
+  border-radius: 3px;
+}
+.preset-status {
+  min-height: 1.5em;
+  padding-top: 10px;
+}
+.symbol-preview {
+  width: 100%;
+  height: 140px;
+  background: #ffffff;
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+}
+@media (max-width: 650px) {
+  .preset-columns {
+    grid-template-columns: 1fr;
+  }
+}
 dialog h2 {
   font-weight: 650;
 }
@@ -2026,5 +2107,429 @@ summary[aria-disabled="true"] {
   .file-feedback,
   .file-feedback-icon {
     animation: none;
+  }
+}
+.recovery-panel {
+  margin: 0.5rem 1rem;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid #d3dae3;
+  border-radius: 10px;
+  background: #fff;
+  max-height: 240px;
+  overflow: auto;
+}
+.recovery-panel summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.recovery-panel p {
+  margin: 0.4rem 0;
+}
+.recovery-panel ul {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.recovery-panel li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0;
+  flex-wrap: wrap;
+}
+.recovery-panel li > span {
+  flex: 1;
+  min-width: 180px;
+}
+.recovery-panel time {
+  display: block;
+  font-size: 0.85rem;
+}
+:root[data-theme="dark"] .recovery-panel {
+  background: #1b2432;
+  border-color: #41516a;
+  color: #e2e8f0;
+}
+.document-panel {
+  order: 0;
+  width: 248px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  color: var(--text);
+}
+.document-panel .panel-heading {
+  padding: 12px;
+}
+.document-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 8px 10px;
+}
+.document-tabs button {
+  min-width: 0;
+  flex: 1;
+  padding: 6px 4px;
+  font-size: 12px;
+}
+.document-tabs button[aria-selected="true"],
+.thumbnail-row[aria-current="page"],
+.bookmark-jump[aria-current="page"] {
+  background: var(--selected);
+  border-color: var(--selected-border);
+}
+.document-panel-content {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.thumbnail-list {
+  height: 100%;
+  overflow: auto;
+}
+.thumbnail-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% - 24px);
+  margin: 0 12px;
+  padding: 8px;
+  overflow: hidden;
+}
+.thumbnail-surface {
+  position: relative;
+  display: block;
+  background: white;
+  flex-shrink: 0;
+  box-shadow: 0 1px 4px #0002;
+}
+.thumbnail-surface canvas,
+.thumbnail-surface svg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.document-list {
+  height: 100%;
+  overflow: auto;
+  padding: 12px;
+  box-sizing: border-box;
+}
+.document-list label {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.document-list input:not([type="checkbox"]),
+.document-list select {
+  width: 100%;
+  margin-top: 4px;
+  box-sizing: border-box;
+}
+.document-list .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.document-list ul {
+  list-style: none;
+  margin: 12px 0;
+  padding: 0;
+}
+.document-list li {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.bookmark-jump,
+.markup-jump {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+.bookmark-jump strong,
+.markup-jump strong {
+  display: block;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.document-panel small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+}
+.markup-jump {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.markup-jump > span:last-child {
+  min-width: 0;
+}
+.markup-dot {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border: 1px solid #0003;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.markup-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+}
+.markup-pagination button {
+  font-size: 12px;
+  padding: 5px 8px;
+}
+.selection-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-soft);
+  font-size: 12px;
+}
+.selection-toolbar button,
+.selection-toolbar select {
+  font-size: 12px;
+  padding: 5px 9px;
+}
+.selection-toolbar [role="status"] {
+  color: var(--muted);
+}
+.selection-overlay {
+  z-index: 5;
+}
+
+.measurement-overlay {
+  z-index: 4;
+}
+.measurement-controls {
+  display: grid;
+  gap: 10px;
+}
+.measurement-controls p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.measurement-controls label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.measurement-controls form {
+  display: grid;
+  gap: 10px;
+}
+.measurement-controls input[type="number"] {
+  width: 110px;
+}
+.measurement-controls small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.document-list .markup-select {
+  flex-shrink: 0;
+  align-self: center;
+  width: 16px;
+  height: 16px;
+}
+/* Optional export controls keep the canvas and default export action uncluttered. */
+.export-options {
+  margin: auto;
+  width: min(32rem, calc(100vw - 2rem));
+  max-height: 88vh;
+  overflow: auto;
+}
+.export-options form,
+.export-options fieldset,
+.export-options label {
+  display: grid;
+  gap: 0.65rem;
+}
+.export-options form {
+  gap: 1rem;
+}
+.export-options label:has(input[type="checkbox"]),
+.export-options label:has(input[type="radio"]) {
+  display: flex;
+  align-items: center;
+}
+.export-options fieldset {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.export-categories {
+  max-height: 10rem;
+  overflow: auto;
+  display: grid;
+  gap: 0.5rem;
+}
+.export-note {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.export-operation {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.4rem 1rem;
+}
+.revision-comparison[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin: auto;
+  width: min(1240px, 96vw);
+  max-width: 96vw;
+  height: 90vh;
+  max-height: 90vh;
+  padding: 16px;
+  overflow: auto;
+}
+.comparison-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.comparison-heading h2 {
+  margin: 0;
+}
+.comparison-files {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.comparison-files section {
+  display: grid;
+  align-content: start;
+  gap: 0.4rem;
+  min-width: 0;
+  padding: 0.5rem;
+  background: var(--surface-soft);
+  border-radius: 8px;
+}
+.comparison-files h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.comparison-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.comparison-page-choice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.comparison-page-choice label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.comparison-page-choice input {
+  width: 4.5rem;
+}
+.comparison-page-choice button {
+  min-width: 2.4rem;
+}
+.comparison-controls {
+  display: flex;
+  gap: 0.75rem;
+  align-items: end;
+  flex-wrap: wrap;
+}
+.comparison-controls label {
+  display: grid;
+  gap: 0.25rem;
+}
+.comparison-alignment {
+  display: flex;
+  align-items: end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding-top: 0.5rem;
+}
+.comparison-alignment input {
+  width: 6rem;
+}
+.comparison-note {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0;
+}
+.comparison-pan {
+  flex: 1;
+  min-height: 200px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  overflow: hidden;
+}
+.comparison-side {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.comparison-viewport {
+  min-width: 0;
+  overflow: auto;
+  padding: 8px;
+  background: var(--canvas);
+  cursor: grab;
+  touch-action: none;
+}
+.comparison-viewport:active {
+  cursor: grabbing;
+}
+.comparison-board {
+  position: relative;
+  background: white;
+  overflow: hidden;
+  box-shadow: 0 1px 4px #0004;
+  isolation: isolate;
+}
+.comparison-sheet {
+  pointer-events: none;
+}
+.comparison-sheet canvas {
+  display: block;
+}
+.comparison-render-status,
+.comparison-render-error {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 0.4rem;
+  max-width: 24rem;
+  background: var(--surface);
+  color: var(--text);
+}
+@media (max-width: 640px) {
+  .comparison-files {
+    gap: 0.5rem;
+  }
+  .comparison-page-choice {
+    font-size: 0.8rem;
+  }
+  .comparison-heading h2 {
+    font-size: 1rem;
   }
 }

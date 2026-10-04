@@ -8,6 +8,15 @@ import {
 import { validShape, MAX_SHAPES, SHAPE_DEFAULTS, type Shape } from "./shapes";
 import { validPageLegend, type PageLegend } from "./pageLegend";
 import type { AnnotationSession } from "./annotationSession";
+import { parseToolStyles } from "./toolStyles";
+import { parseNavigation, type DocumentNavigation } from "./documentNavigation";
+import {
+  MAX_MEASUREMENTS,
+  validMeasurement,
+  validCalibration,
+  type Measurement,
+  type PageCalibration,
+} from "./measurements";
 
 export const MAX_PROJECT_BYTES = 16 * 1024 * 1024;
 export type SourceIdentity = {
@@ -19,9 +28,10 @@ export type SourceIdentity = {
 };
 export type Project = {
   format: "pdf-markup-project";
-  version: 2;
+  version: 2 | 3 | 4;
   source: SourceIdentity;
   session: AnnotationSession;
+  navigation?: DocumentNavigation;
 };
 const fail = (field: string): never => {
   throw new Error(`Invalid project: ${field}.`);
@@ -106,7 +116,12 @@ export function parseProject(text: string): Project {
   }
   const root = object(raw, "root");
   if (root.format !== "pdf-markup-project") return fail("format");
-  if (root.version !== 1 && root.version !== 2)
+  if (
+    root.version !== 1 &&
+    root.version !== 2 &&
+    root.version !== 3 &&
+    root.version !== 4
+  )
     return fail("unsupported version");
   const source = object(root.source, "source");
   const sha256 = string(source.sha256, "source hash", 64);
@@ -120,6 +135,12 @@ export function parseProject(text: string): Project {
   };
 
   const session = object(root.session, "session");
+  if (session.toolStyles !== undefined && root.version !== 4)
+    return fail("tool styles require project version 4");
+  const toolStyles =
+    session.toolStyles === undefined
+      ? undefined
+      : parseToolStyles(session.toolStyles);
   const ids = new Set<string>(),
     names = new Set<string>();
   const legends = array(session.legends, "legends", 1000).map((item) => {
@@ -135,7 +156,28 @@ export function parseProject(text: string): Project {
       return fail("duplicate ID or invalid/duplicate legend name");
     ids.add(id);
     names.add(name.toLowerCase());
-    return { id, name, color: color(legend.color) };
+    if (
+      (legend.hidden !== undefined && typeof legend.hidden !== "boolean") ||
+      (legend.locked !== undefined && typeof legend.locked !== "boolean")
+    )
+      return fail("category visibility/locking");
+    if (
+      root.version !== 3 &&
+      root.version !== 4 &&
+      (legend.hidden !== undefined || legend.locked !== undefined)
+    )
+      return fail("category settings require project version 3");
+    return {
+      id,
+      name,
+      color: color(legend.color),
+      ...(legend.hidden !== undefined
+        ? { hidden: legend.hidden as boolean }
+        : {}),
+      ...(legend.locked !== undefined
+        ? { locked: legend.locked as boolean }
+        : {}),
+    };
   });
   const relationship = (id: unknown): string | null =>
     id === null
@@ -247,18 +289,98 @@ export function parseProject(text: string): Project {
         });
   if (!validNotes(notes, [...ids, ...annotationIds], identity.pages))
     return fail("note text, geometry, pointers or duplicate IDs");
+  const measurementIds = new Set([
+    ...ids,
+    ...annotationIds,
+    ...notes.flatMap((n) => [
+      n.id,
+      ...(n.type === "text" ? n.pointers.map((p) => p.id) : []),
+    ]),
+  ]);
+  if (
+    root.version !== 4 &&
+    (session.measurements !== undefined || session.calibrations !== undefined)
+  )
+    return fail("measurements require project version 4");
+  const measurements = array(
+    session.measurements ?? [],
+    "measurements",
+    MAX_MEASUREMENTS,
+  ).map((item) => {
+    const m = object(item, "measurement") as unknown as Measurement;
+    if (!validMeasurement(m, identity.pages) || measurementIds.has(m.id))
+      return fail("measurement geometry, style or ID");
+    measurementIds.add(m.id);
+    return {
+      id: m.id,
+      type: m.type,
+      page: m.page,
+      points: m.points.map((p) => ({ x: p.x, y: p.y })),
+      color: m.color,
+      width: m.width,
+      fontSize: m.fontSize,
+    };
+  });
+  const calibratedPages = new Set<number>();
+  const calibrations = array(
+    session.calibrations ?? [],
+    "calibrations",
+    identity.pages,
+  ).map((item) => {
+    const c = object(item, "calibration") as unknown as PageCalibration;
+    if (!validCalibration(c, identity.pages) || calibratedPages.has(c.page))
+      return fail("page calibration");
+    calibratedPages.add(c.page);
+    return {
+      page: c.page,
+      a: { x: c.a.x, y: c.a.y },
+      b: { x: c.b.x, y: c.b.y },
+      distance: c.distance,
+      unit: c.unit,
+    };
+  });
+  let objectCategories: Record<string, string> | undefined;
+  if (session.objectCategories !== undefined) {
+    if (root.version !== 3 && root.version !== 4)
+      return fail("object categories require project version 3");
+    const entries = Object.entries(
+      object(session.objectCategories, "object categories"),
+    );
+    if (entries.length > 21000 + MAX_MEASUREMENTS)
+      return fail("object category count");
+    const owners = new Set(
+      [...shapes, ...notes, ...pageLegends, ...measurements].map((s) => s.id),
+    );
+    if (
+      entries.some(
+        ([id, category]) =>
+          !owners.has(id) || typeof category !== "string" || !ids.has(category),
+      )
+    )
+      return fail("object category relationship");
+    if (entries.length)
+      objectCategories = Object.fromEntries(entries) as Record<string, string>;
+  }
   const drawing = style(session.drawing),
     activeLegendId = relationship(session.activeLegendId);
   if (
     activeLegendId !== null &&
-    legends.find((l) => l.id === activeLegendId)!.color !== drawing.color
+    (legends.find((l) => l.id === activeLegendId)!.color !== drawing.color ||
+      legends.some((l) => l.id === activeLegendId && (l.hidden || l.locked)))
   )
     return fail("active legend/drawing color");
   return {
     format: "pdf-markup-project",
-    version: 2,
+    version: root.version === 4 ? 4 : root.version === 3 ? 3 : 2,
     source: identity,
+    ...(root.navigation === undefined
+      ? {}
+      : { navigation: parseNavigation(root.navigation, identity.pages) }),
     session: {
+      ...(toolStyles ? { toolStyles } : {}),
+      ...(measurements.length ? { measurements } : {}),
+      ...(calibrations.length ? { calibrations } : {}),
+      ...(objectCategories ? { objectCategories } : {}),
       ...(notes.length ? { notes } : {}),
       legends,
       annotations,
@@ -273,12 +395,22 @@ export function parseProject(text: string): Project {
 export function serializeProject(
   source: SourceIdentity,
   session: AnnotationSession,
+  navigation?: DocumentNavigation,
 ): string {
   const text = JSON.stringify({
     format: "pdf-markup-project",
-    version: 2,
+    version:
+      session.measurements || session.calibrations || session.toolStyles
+        ? 4
+        : session.objectCategories ||
+            session.legends.some(
+              (l) => l.hidden !== undefined || l.locked !== undefined,
+            )
+          ? 3
+          : 2,
     source,
     session,
+    ...(navigation ? { navigation } : {}),
   });
   parseProject(text);
   return text;

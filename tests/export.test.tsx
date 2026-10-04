@@ -7,11 +7,13 @@ import {
   PDFRawStream,
   decodePDFRawStream,
   degrees,
+  rgb,
 } from "pdf-lib";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { createCanvas } from "@napi-rs/canvas";
 import { generateAnnotatedPdf } from "../src/services/pdfExport";
 import { emptySession } from "../src/services/annotationSession";
+import { defaultExportSelection } from "../src/services/exportSelection";
 import type { Highlight } from "../src/types/annotation";
 
 // Node Skia/PDF.js transparency groups quantize alpha differently from browser SVG
@@ -62,6 +64,97 @@ async function raster(bytes: Uint8Array, scale = 1, pageNumber = 1) {
     Array.from(canvas.getContext("2d").getImageData(x, y, 1, 1).data);
   return { task, pdf, page, viewport, pixel };
 }
+
+it("exports selected original pages with correctly mapped marks, unchanged original vector streams and rotated crop/UserUnit geometry", async () => {
+  const original = await PDFDocument.load(await fixture(90, 2));
+  original.getPage(1).drawRectangle({
+    x: 20,
+    y: 30,
+    width: 15,
+    height: 10,
+    color: rgb(0, 1, 0),
+  });
+  const source = await original.save(),
+    before = source.slice(),
+    input = await PDFDocument.load(source),
+    streams = input.context
+      .enumerateIndirectObjects()
+      .filter(([, o]) => o instanceof PDFRawStream)
+      .map(([, o]) => (o as PDFRawStream).getContents().slice()),
+    session = {
+      ...emptySession,
+      legends: [
+        { id: "walls", name: "Walls", color: "#facc15", locked: true },
+        { id: "hidden", name: "Doors", color: "#38bdf8", hidden: true },
+      ],
+      annotations: [
+        line(
+          "page1",
+          [
+            { x: 20, y: 60 },
+            { x: 140, y: 60 },
+          ],
+          { page: 1, color: "#00ff00", legendId: "walls" },
+        ),
+        line(
+          "page2",
+          [
+            { x: 20, y: 60 },
+            { x: 140, y: 60 },
+          ],
+          { page: 2, legendId: "walls" },
+        ),
+        line(
+          "excluded",
+          [
+            { x: 20, y: 100 },
+            { x: 140, y: 100 },
+          ],
+          { page: 2, color: "#38bdf8", legendId: "hidden" },
+        ),
+      ],
+    },
+    snapshot = structuredClone(session),
+    result = await generateAnnotatedPdf(source, session, undefined, undefined, {
+      ...defaultExportSelection(2),
+      pages: [2],
+      includeHidden: false,
+    });
+  expect(source).toEqual(before);
+  expect(session).toEqual(snapshot);
+  const output = await PDFDocument.load(result),
+    outputStreams = output.context
+      .enumerateIndirectObjects()
+      .filter(([, o]) => o instanceof PDFRawStream)
+      .map(([, o]) => (o as PDFRawStream).getContents());
+  expect(output.getPageCount()).toBe(1);
+  for (const stream of streams)
+    expect(
+      outputStreams.some((s) => Buffer.from(s).equals(Buffer.from(stream))),
+    ).toBe(true);
+  const r = await raster(result);
+  try {
+    expect(r.pdf.numPages).toBe(1);
+    expect(r.page.rotate).toBe(90);
+    expect(r.page.userUnit).toBe(2);
+    expect(r.page.view).toEqual([-10.5, 10.25, 189.5, 160.25]);
+    const at = (x: number, y: number) => {
+      const p = r.viewport.convertToViewportPoint(x, y);
+      return r.pixel(Math.floor(p[0]), Math.floor(p[1]));
+    };
+    expect(at(40, 60)).toEqual([253, 235, 162, 255]);
+    expect(at(40, 100)).toEqual([255, 255, 255, 255]);
+    expect(at(25, 35)).toEqual([0, 255, 0, 255]);
+  } finally {
+    await r.task.destroy();
+  }
+  await expect(
+    generateAnnotatedPdf(source, session, undefined, undefined, {
+      ...defaultExportSelection(2),
+      pages: [3],
+    }),
+  ).rejects.toThrow("Invalid export selection");
+});
 it("no annotations retains all page geometry and leaves source/session unchanged", async () => {
   const source = await fixture(90, 2),
     before = source.slice();

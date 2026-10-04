@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "PDF Markup",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "identifier": "com.orcific.pdf-markup-tool",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -43,7 +43,10 @@
     "resources": {
       "../LICENSE": "LICENSE",
       "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "../third_party/nsis/COPYING": "licenses/NSIS_COPYING",
       "../src/assets/LegendSans.LICENSE": "licenses/LegendSans.LICENSE",
+      "../third_party/fonts/README.md": "licenses/font-source/README.md",
+      "../third_party/fonts/liberation-fonts-1.07.4.tar.gz": "licenses/font-source/liberation-fonts-1.07.4.tar.gz",
       "../public/THIRD_PARTY_LICENSES.txt": "licenses/JAVASCRIPT_LICENSES.txt",
       "../public/RUST_LICENSES.txt": "licenses/RUST_LICENSES.txt"
     },
