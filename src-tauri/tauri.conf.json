@@ -43,6 +43,7 @@
     "resources": {
       "../LICENSE": "LICENSE",
       "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "../third_party/nsis/COPYING": "licenses/NSIS_COPYING",
       "../src/assets/LegendSans.LICENSE": "licenses/LegendSans.LICENSE",
       "../third_party/fonts/README.md": "licenses/font-source/README.md",
       "../third_party/fonts/liberation-fonts-1.07.4.tar.gz": "licenses/font-source/liberation-fonts-1.07.4.tar.gz",
