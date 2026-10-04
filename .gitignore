@@ -83,6 +83,14 @@ coverage/
 *.tsbuildinfo
 
 internal_docs/
+# Local workflow configuration and working notes.
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.agents/
+.codex/
+.claude/
+.cursor/
 public/pdfjs/
 public/THIRD_PARTY_LICENSES.txt
 public/RUST_LICENSES.txt
