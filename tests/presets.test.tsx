@@ -232,7 +232,7 @@ it("rejects future, oversized, malformed and unsafe presets and symbols", () => 
   ).toThrow(/highlights, shapes/);
 });
 
-it("previews category conflicts and applies styles/categories in one undo step without changing existing marks or protection", () => {
+it("previews category conflicts and applies styles/categories outside history without changing existing marks or protection", () => {
   const before = {
     ...fixture(),
     legends: [
@@ -270,13 +270,13 @@ it("previews category conflicts and applies styles/categories in one undo step w
   expect(plan.renamed).toEqual([{ from: "Walls", to: "Walls (2)" }]);
   expect(history.present).toBe(before);
   expect(history.apply(plan.action!)).toBe(true);
-  expect(history.undoLabel).toBe("Apply preset");
+  expect(history.undoLabel).toBeUndefined();
   expect(history.present.annotations).toBe(before.annotations);
   expect(history.present.legends[0]).toBe(before.legends[0]);
   expect(history.present.toolStyles?.measurement.fontSize).toBe(24);
   const applied = history.present;
   history.traverse("undo");
-  expect(history.present).toBe(before);
+  expect(history.present).toBe(applied);
   history.traverse("redo");
   expect(history.present).toBe(applied);
   const reuse = applyPreset(
@@ -299,7 +299,7 @@ it("previews category conflicts and applies styles/categories in one undo step w
   expect(history.apply(plan.action!)).toBe(false);
 });
 
-it("places a mixed original symbol on rotated UserUnit pages, remaps IDs/categories and nested pointers, and undoes everything atomically", () => {
+it("places a mixed symbol on rotated UserUnit pages with fresh IDs and undoes only its highlights", () => {
   const original = fixture(),
     symbol = captureSymbol(
       "Door",
@@ -329,7 +329,7 @@ it("places a mixed original symbol on rotated UserUnit pages, remaps IDs/categor
     ),
     history = new SessionHistory(destination);
   expect(history.apply(placed.action)).toBe(true);
-  expect(history.undoLabel).toBe("Place symbol");
+  expect(history.undoLabel).toBe("Draw highlight");
   expect(history.present.legends[1].name).toBe("Walls (2)");
   const objects = selectedObjects(history.present, placed.ids),
     bounds = selectionBounds(objects, history.present.legends, target);
@@ -366,9 +366,12 @@ it("places a mixed original symbol on rotated UserUnit pages, remaps IDs/categor
   expect(history.present.calibrations).toBeUndefined();
   const after = history.present;
   history.traverse("undo");
-  expect(history.present).toBe(destination);
+  expect(history.present.annotations).toEqual(destination.annotations);
+  expect(history.present.shapes).toBe(after.shapes);
+  expect(history.present.notes).toBe(after.notes);
+  expect(history.present.legends).toBe(after.legends);
   history.traverse("redo");
-  expect(history.present).toBe(after);
+  expect(history.present).toEqual(after);
   const protectedDestination = {
     ...destination,
     legends: [

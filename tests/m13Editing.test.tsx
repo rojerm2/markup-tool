@@ -106,10 +106,11 @@ it("rounding pointer/key previews commit once; Escape, blur, cancellation, snaps
   fireEvent.pointerUp(slider);
   expect(h.present.drawing.rounding).toBe(75);
   expect(captured).toBeNull();
+  const committed = h.present;
   act(() => {
     h.traverse("undo");
   });
-  expect(h.present).toBe(emptySession);
+  expect(h.present).toBe(committed);
   for (const reason of ["Escape", "blur", "cancel", "snapshot", "history"]) {
     fireEvent.pointerDown(slider, { pointerId: 1 });
     fireEvent.change(slider, { target: { value: 25 } });
@@ -124,17 +125,18 @@ it("rounding pointer/key previews commit once; Escape, blur, cancellation, snaps
       }
     });
     fireEvent.pointerUp(slider);
-    expect(h.present).toBe(emptySession);
+    expect(h.present).toBe(committed);
     expect(captured).toBeNull();
   }
   fireEvent.keyDown(slider, { key: "ArrowLeft" });
   fireEvent.change(slider, { target: { value: 99 } });
   fireEvent.change(slider, { target: { value: 98 } });
-  expect(h.present).toBe(emptySession);
+  expect(h.present).toBe(committed);
   fireEvent.keyUp(slider, { key: "ArrowLeft" });
   expect(h.present.drawing.rounding).toBe(98);
   h.traverse("undo");
-  expect(h.present).toBe(emptySession);
+  expect(h.present.drawing.rounding).toBe(98);
+  expect(h.undoLabel).toBeUndefined();
 });
 
 function Shapes({
@@ -207,7 +209,8 @@ it.each(["rectangle", "ellipse", "line"] as const)(
       }
     const count = h.present.shapes!.length;
     h.traverse("undo");
-    expect(h.present.shapes).toHaveLength(count - 1);
+    expect(h.present.shapes).toHaveLength(count);
+    expect(h.undoLabel).toBeUndefined();
     h.traverse("redo");
     expect(h.present.shapes).toHaveLength(count);
   },
@@ -259,7 +262,7 @@ it.each([
   expect(h.undoLabel).toBeUndefined();
 });
 it.each(["rectangle", "ellipse", "line"] as const)(
-  "moves and resizes %s with single undoable gestures and original snapshots",
+  "moves and resizes %s without highlight history and preserves original snapshots",
   (type) => {
     const s = { ...shape, type },
       h = new SessionHistory({ ...emptySession, shapes: [s] });
@@ -277,10 +280,14 @@ it.each(["rectangle", "ellipse", "line"] as const)(
     pointer(svg, "pointerUp", 250, 260);
     expect(h.present).not.toBe(moved);
     expect(h.present.shapes![0]).not.toEqual(moved.shapes![0]);
+    const resized = h.present;
     h.traverse("undo");
-    expect(h.present).toBe(moved);
+    expect(h.present).toBe(resized);
     h.traverse("undo");
-    expect(h.present.shapes![0]).toBe(s);
+    expect(h.present).toBe(resized);
+    expect(h.undoLabel).toBeUndefined();
+    expect(moved.shapes![0].a).toEqual({ x: 120, y: 570 });
+    expect(s.a).toBe(shape.a);
   },
 );
 
@@ -296,5 +303,6 @@ it("keyboard handle resize previews remain out of snapshots and commit once on r
   fireEvent.keyUp(handle, { key: "ArrowRight" });
   expect(h.present.shapes![0].a.x).toBe(104);
   h.traverse("undo");
-  expect(h.present.shapes![0]).toBe(shape);
+  expect(h.present.shapes![0].a.x).toBe(104);
+  expect(h.undoLabel).toBeUndefined();
 });

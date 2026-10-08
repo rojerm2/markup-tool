@@ -59,12 +59,14 @@ it("moves a mixed group in visual page coordinates, including pointer targets, a
   const note = history.present.notes![0];
   if (note.type !== "text") throw new Error("Expected text");
   expect(note.pointers[0].target).toEqual({ x: 14, y: 26 });
-  expect(history.undoLabel).toBe("Move selection");
+  expect(history.undoLabel).toBe("Move highlight");
   history.traverse("undo");
-  expect(history.present).toBe(before);
-  history.apply(moveMarkups(before, ids, 1e6, 1e6, () => view));
+  expect(history.present.annotations).toEqual(before.annotations);
+  expect(history.present.notes![0]).toBe(note);
+  const bounded = new SessionHistory(before);
+  bounded.apply(moveMarkups(before, ids, 1e6, 1e6, () => view));
   const box = selectionBounds(
-    selectedObjects(history.present, ids),
+    selectedObjects(bounded.present, ids),
     before.legends,
     view,
   );
@@ -101,9 +103,11 @@ it("duplicates objects across pages with unique IDs as one transaction and delet
   expect(history.present.objectCategories?.[history.present.notes![1].id]).toBe(
     "walls",
   );
-  expect(history.undoLabel).toBe("Duplicate markups");
+  expect(history.undoLabel).toBe("Draw highlight");
   history.traverse("undo");
-  expect(history.present).toBe(before);
+  expect(history.present.annotations).toEqual(before.annotations);
+  expect(history.present.shapes).toHaveLength(2);
+  expect(history.present.notes).toHaveLength(2);
   expect(history.traverse("undo")).toBe(false);
   history.traverse("redo");
   const copied = history.present;
@@ -112,7 +116,9 @@ it("duplicates objects across pages with unique IDs as one transaction and delet
   expect(history.present.shapes).toHaveLength(1);
   expect(history.present.notes).toHaveLength(1);
   history.traverse("undo");
-  expect(history.present).toBe(copied);
+  expect(history.present.annotations).toEqual(copied.annotations);
+  expect(history.present.shapes).toHaveLength(1);
+  expect(history.present.notes).toHaveLength(1);
   const protectedState = {
     ...before,
     legends: [{ ...before.legends[0], locked: true }],
@@ -173,9 +179,11 @@ it("copies mixed geometry to a rotated page with fresh IDs and one Undo step, pr
     sourceTarget[1] - sourceAnchor[1],
   );
   expect(history.present.objectCategories?.[pasted.id]).toBe("wall");
-  expect(history.undoLabel).toBe("Paste markups");
+  expect(history.undoLabel).toBe("Draw highlight");
   expect(history.traverse("undo")).toBe(true);
-  expect(history.present).toBe(before);
+  expect(history.present.annotations).toEqual(before.annotations);
+  expect(history.present.notes).toHaveLength(2);
+  expect(history.present.shapes).toHaveLength(2);
   expect(history.traverse("redo")).toBe(true);
   expect(history.present.annotations).toHaveLength(2);
   expect(before.notes).toHaveLength(1);
@@ -435,7 +443,7 @@ function fixture(): AnnotationSession {
     ],
   };
 }
-it("deletes mixed objects in one undo transaction and restores nested pointers exactly", () => {
+it("deletes mixed objects atomically and restores only highlights through undo", () => {
   const before = fixture(),
     history = new SessionHistory(before);
   expect(
@@ -453,10 +461,11 @@ it("deletes mixed objects in one undo transaction and restores nested pointers e
   expect(history.present.annotations).toHaveLength(0);
   expect(history.present.shapes).toBeUndefined();
   expect(history.present.notes).toBeUndefined();
-  expect(history.undoLabel).toBe("Delete selection");
+  expect(history.undoLabel).toBe("Delete highlight");
   expect(history.traverse("undo")).toBe(true);
-  expect(history.present).toBe(before);
-  expect(history.present.notes?.[0]).toEqual(before.notes![0]);
+  expect(history.present.annotations).toEqual(before.annotations);
+  expect(history.present.notes).toBeUndefined();
+  expect(history.present.shapes).toBeUndefined();
   expect(history.traverse("undo")).toBe(false);
   expect(history.traverse("redo")).toBe(true);
   expect(history.present.annotations).toHaveLength(0);

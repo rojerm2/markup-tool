@@ -47,7 +47,7 @@ const source = {
   size: 100,
   pages: 2,
 };
-it("returns to the clean baseline after removing the last key and restores empty-key category deletion atomically", () => {
+it("returns to the clean baseline after removing the last key and leaves category deletion outside highlight history", () => {
   const h = new SessionHistory(base);
   h.apply({ type: "put-key", key: { ...key, categoryIds: ["wall"] }, legends });
   h.apply({ type: "remove-key", id: key.id });
@@ -57,12 +57,18 @@ it("returns to the clean baseline after removing the last key and restores empty
       .session,
   ).toEqual(base);
   h.traverse("undo");
-  const placed = h.present;
+  expect(h.present.pageLegends).toBeUndefined();
+  h.apply({
+    type: "put-key",
+    key: { ...key, categoryIds: ["wall"] },
+    legends: h.present.legends,
+  });
   h.apply({ type: "delete", id: "wall" });
   expect(h.present.pageLegends).toBeUndefined();
   h.traverse("undo");
-  expect(h.present).toBe(placed);
-  expect(h.present.pageLegends![0].categoryIds).toEqual(["wall"]);
+  expect(h.present.pageLegends).toBeUndefined();
+  expect(h.present.legends.some((l) => l.id === "wall")).toBe(false);
+  expect(h.undoLabel).toBeUndefined();
 });
 it("migrates v1 without changing legacy values and validates v2 ordered references and geometry", () => {
   const legacy = {
@@ -115,7 +121,7 @@ it("migrates v1 without changing legacy values and validates v2 ordered referenc
     ),
   ).toThrow(/version/);
 });
-it("records atomic relationships, independent duplication, removal and guarded history", () => {
+it("keeps atomic relationships, independent duplication, removal and stale-gesture guards outside highlight history", () => {
   const h = new SessionHistory(base);
   h.apply({ type: "put-key", key, legends: h.present.legends });
   h.apply({
@@ -161,7 +167,10 @@ it("records atomic relationships, independent duplication, removal and guarded h
     h.present.pageLegends!.every((k) => !k.categoryIds.includes("wall")),
   ).toBe(true);
   h.traverse("undo");
-  expect(h.present.pageLegends![0].categoryIds).toEqual(key.categoryIds);
+  expect(h.present.pageLegends![0].categoryIds).toEqual(
+    key.categoryIds.filter((id) => id !== "wall"),
+  );
+  expect(h.undoLabel).toBeUndefined();
   const snapshot = h.present;
   h.apply({ type: "remove-key", id: "key" });
   expect(h.present.legends).toBe(snapshot.legends);

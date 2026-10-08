@@ -89,7 +89,7 @@ afterEach(() => {
   localStorage.clear();
 });
 
-it("previews an import and conflicts without changing the document or library, then applies a single undoable action", async () => {
+it("previews an import without changing the document/library and applies settings outside highlight history", async () => {
   vi.mocked(files.importPresetFile).mockResolvedValue(imported);
   const { apply, close } = setup();
   click("Import preset");
@@ -107,7 +107,9 @@ it("previews an import and conflicts without changing the document or library, t
   expect(history.present.annotations).toBe(before.annotations);
   expect(history.present.drawing.width).toBe(22);
   history.traverse("undo");
-  expect(history.present).toBe(before);
+  expect(history.present.drawing.width).toBe(22);
+  expect(history.present.legends).toHaveLength(2);
+  expect(history.undoLabel).toBeUndefined();
   expect(close).toHaveBeenCalledOnce();
 });
 

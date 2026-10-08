@@ -95,7 +95,7 @@ it("validates bounded optional v2 shape defaults, IDs, malformed data and unchan
     }),
   ).toThrow();
 });
-it("supports atomic create/edit/move/resize/delete history, reference/ABA guards and clean equality", () => {
+it("supports shape edits outside highlight history, reference/ABA guards and clean equality", () => {
   const h = new SessionHistory(emptySession);
   h.apply({ type: "put-shape", shape });
   const original = h.present;
@@ -105,7 +105,9 @@ it("supports atomic create/edit/move/resize/delete history, reference/ABA guards
   h.apply({ type: "put-shape", before: shape, shape: moveShape(shape, 2, -3) });
   expect(h.present.shapes![0].a).toEqual({ x: 32, y: 37 });
   h.traverse("undo");
-  expect(h.present).toBe(original);
+  expect(h.present.shapes![0].a).toEqual({ x: 32, y: 37 });
+  expect(original.shapes![0]).toBe(shape);
+  expect(h.undoLabel).toBeUndefined();
   const g = h.generation;
   h.traverse("redo");
   h.traverse("undo");
@@ -118,7 +120,7 @@ it("supports atomic create/edit/move/resize/delete history, reference/ABA guards
   h.apply({ type: "remove-shape", id: shape.id });
   expect(sameSession(h.present, emptySession)).toBe(true);
   h.traverse("undo");
-  expect(h.present.shapes![0]).toBe(shape);
+  expect(h.present.shapes).toBeUndefined();
 });
 it.each([0, 90, 180, 270])(
   "constraints, resizing, visible picking and actual vector exports on rotated/cropped UserUnit page %i",

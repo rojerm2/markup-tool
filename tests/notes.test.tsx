@@ -137,11 +137,12 @@ it("owns three independent targets, preserves them on move/reflow, safely attach
   });
   expect((h.present.notes![0] as TextNote).pointers).toHaveLength(2);
   h.traverse("undo");
-  expect(h.present.notes![0]).toBe(edited);
+  expect((h.present.notes![0] as TextNote).pointers).toHaveLength(2);
+  expect(h.undoLabel).toBeUndefined();
   h.apply({ type: "remove-note", id: "n" });
   expect(sameSession(h.present, emptySession)).toBe(true);
   h.traverse("undo");
-  expect(h.present.notes![0]).toBe(edited);
+  expect(h.present.notes).toBeUndefined();
   const generation = h.generation;
   h.traverse("undo");
   h.traverse("redo");

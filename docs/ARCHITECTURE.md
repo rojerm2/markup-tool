@@ -27,12 +27,16 @@ the same geometry/layout functions. Rendering bounds the full-page raster
 and adds detail only for the visible area.
 
 Committed annotations belong to the session. Pointer/input drafts are separate
-until committed; history groups a continuous resize or slider drag into one
-operation. Save, export, and print snapshot committed state and cancel pending
+until committed. History records highlight creation, deletion and movement as
+geometry deltas, preserving current appearance, settings and other markup types
+during traversal. Settings do not clear highlight redo. Restoration respects
+category locks and ID ownership, and detaches references to deleted categories.
+Save, export, and print snapshot committed state and cancel pending
 gestures without applying unfinished text/property drafts.
 
 Bulk edits validate an immutable starting snapshot and every child operation
-before accepting a single history entry. Selection and the bounded, document-local
+before accepting the batch; only its highlight geometry changes form a history
+entry. Selection and the bounded, document-local
 clipboard are transient UI state. Paste transforms through source and destination
 PDF viewports, gives objects and nested pointers fresh IDs, checks category policy
 and validates resulting project limits. Hidden categories affect workspace
@@ -50,7 +54,8 @@ Reusable presets are bounded versioned JSON with drawing styles, category
 definitions and original selected-object symbols. They contain no document
 source, view metadata or calibration. Symbol geometry uses a canonical viewport
 and the same validated clipboard transforms as ordinary paste. Applying a
-preset or placing a symbol is a guarded atomic history transaction; name/color
+preset or placing a symbol is a guarded atomic session transaction; highlight
+placement alone enters undo history. Name/color
 conflicts add a renamed category instead of mutating an existing definition.
 Shape and measurement defaults are optional schema-4 session data. The local
 library is capped at 24 entries/4 MiB, each portable file at 1 MiB, and each

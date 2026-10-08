@@ -17,7 +17,7 @@ import {
 } from "../src/services/presets";
 import { DEFAULT_TOOL_STYLES } from "../src/services/toolStyles";
 
-it("keeps preset dialog shortcuts out of the canvas and places a stored selection with atomic undo", () => {
+it("keeps preset dialog shortcuts out of the canvas and undoes only a placed symbol's highlights", () => {
   HTMLDialogElement.prototype.showModal = function () {
     this.setAttribute("open", "");
     this.querySelector<HTMLButtonElement>("button")?.focus();
@@ -53,16 +53,17 @@ it("keeps preset dialog shortcuts out of the canvas and places a stored selectio
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(history.present.annotations).toHaveLength(2);
   expect(history.present.shapes).toHaveLength(2);
-  expect(history.undoLabel).toBe("Place symbol");
+  expect(history.undoLabel).toBe("Draw highlight");
   expect(document.activeElement).toBe(
     screen.getByRole("region", { name: "PDF pages" }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Undo", exact: true }));
-  expect(history.present).toBe(before);
+  expect(history.present.annotations).toEqual(before.annotations);
+  expect(history.present.shapes).toHaveLength(2);
   localStorage.clear();
 });
 
-it("restores preset tool styles in the viewer and undoes/redoes their application without changing existing measurements", () => {
+it("restores preset tool styles in the viewer without adding highlight history", () => {
   measurementRect();
   const history = new SessionHistory(emptySession),
     preset = capturePreset("Dimensions", {
@@ -88,10 +89,10 @@ it("restores preset tool styles in the viewer and undoes/redoes their applicatio
     (screen.getByLabelText("Measurement color") as HTMLInputElement).value,
   ).toBe("#ff0000");
   fireEvent.click(screen.getByRole("button", { name: "Undo" }));
-  expect(history.present).toBe(emptySession);
+  expect(history.present).toBe(applied);
   expect(
     (screen.getByLabelText("Measurement text size") as HTMLInputElement).value,
-  ).toBe("12");
+  ).toBe("24");
   fireEvent.click(screen.getByRole("button", { name: "Redo" }));
   expect(history.present).toBe(applied);
   measurementLine();
@@ -184,7 +185,7 @@ function measurementLine(pageNumber: number = 1) {
   });
 }
 
-it("calibrates one page, measures length, recalibrates with undo and keeps other pages explicitly uncalibrated", () => {
+it("calibrates/recalibrates outside highlight history and keeps other pages explicitly uncalibrated", () => {
   measurementRect();
   const history = new SessionHistory(emptySession);
   render(<PdfNavigationView pages={[page(1), page(2)]} history={history} />);
@@ -203,7 +204,7 @@ it("calibrates one page, measures length, recalibrates with undo and keeps other
   fireEvent.click(screen.getByRole("button", { name: "Apply scale" }));
   expect(history.present.calibrations![0].distance).toBe(10);
   expect(history.present.calibrations![0].unit).toBe("m");
-  expect(history.undoLabel).toBe("Calibrate page");
+  expect(history.undoLabel).toBeUndefined();
   measurementLine();
   expect(history.present.measurements).toHaveLength(1);
   const label = () =>
@@ -216,7 +217,7 @@ it("calibrates one page, measures length, recalibrates with undo and keeps other
   fireEvent.click(screen.getByRole("button", { name: "Apply scale" }));
   expect(label()).toBe("20 m");
   fireEvent.click(screen.getByRole("button", { name: "Undo" }));
-  expect(label()).toBe("10 m");
+  expect(label()).toBe("20 m");
   fireEvent.click(screen.getByRole("button", { name: "Next page" }));
   measurementLine(2);
   expect(history.present.measurements).toHaveLength(2);
@@ -327,7 +328,9 @@ it("selects measurements from the list, nudges with arrows, applies appearance a
   fireEvent.click(screen.getByRole("button", { name: "Apply appearance" }));
   expect(history.present.measurements![0].fontSize).toBe(24);
   fireEvent.click(screen.getByRole("button", { name: "Undo" }));
-  expect(history.present).toBe(before);
+  expect(history.present.measurements![0].fontSize).toBe(24);
+  expect(history.present.measurements![0].points[0].x).toBe(102);
+  expect(history.undoLabel).toBeUndefined();
   fireEvent.click(screen.getByRole("button", { name: "Legends (1)" }));
   fireEvent.click(screen.getByRole("button", { name: "Lock category Walls" }));
   fireEvent.change(screen.getByLabelText("Measurement tool"), {
@@ -346,7 +349,7 @@ it("selects measurements from the list, nudges with arrows, applies appearance a
   ).toBeNull();
 });
 
-it("edits measurement vertices in one undo step, cancels stale drags and appearance drafts, and clears empty-space selection", () => {
+it("edits measurement vertices outside highlight history, cancels stale drags/drafts and clears empty-space selection", () => {
   measurementRect();
   const value = {
       id: "dimension",
@@ -389,7 +392,7 @@ it("edits measurement vertices in one undo step, cancels stale drags and appeara
     x: 250,
     y: 250,
   });
-  expect(history.undoLabel).toBe("Draw/edit measurement");
+  expect(history.undoLabel).toBeUndefined();
   fireEvent.change(screen.getByLabelText("Measurement text size"), {
     target: { value: "24" },
   });
@@ -421,7 +424,8 @@ it("edits measurement vertices in one undo step, cancels stale drags and appeara
   fireEvent.keyDown(host, { key: "ArrowRight" });
   expect(history.present).toBe(edited);
   fireEvent.click(screen.getByRole("button", { name: "Undo" }));
-  expect(history.present).toBe(before);
+  expect(history.present).toBe(edited);
+  expect(history.undoLabel).toBeUndefined();
 });
 
 it("adds and removes canvas marks with Shift-click, then clears the group on a result jump or background click", () => {
@@ -500,10 +504,10 @@ it("copies a mixed selection to another page, preserves typing shortcuts, and pa
   expect(history.present.annotations[1].page).toBe(2);
   expect(history.present.shapes![1].page).toBe(2);
   expect(screen.getByLabelText("Selection for page 2")).toBeDefined();
-  expect(history.undoLabel).toBe("Paste markups");
+  expect(history.undoLabel).toBe("Draw highlight");
   fireEvent.click(screen.getByRole("button", { name: "Undo" }));
   expect(history.present.annotations).toHaveLength(1);
-  expect(history.present.shapes).toHaveLength(1);
+  expect(history.present.shapes).toHaveLength(2);
   expect(screen.queryByText("2 selected")).toBeNull();
   expect(history.undoLabel).toBeUndefined();
   fireEvent.click(screen.getByRole("button", { name: "Redo" }));
@@ -522,7 +526,7 @@ it("nudges, assigns, duplicates and deletes a group atomically without panning o
   expect(history.present.annotations[0].points[0].x).toBe(102);
   expect(history.present.shapes![0].a.x).toBe(102);
   expect(host.scrollLeft).toBe(scroll);
-  expect(history.undoLabel).toBe("Move selection");
+  expect(history.undoLabel).toBe("Move highlight");
   fireEvent.keyDown(host, { code: "Space", key: " " });
   expect(host.className).toContain("can-pan");
   fireEvent.keyUp(host, { code: "Space", key: " " });
@@ -533,10 +537,10 @@ it("nudges, assigns, duplicates and deletes a group atomically without panning o
   expect(history.present.objectCategories?.shape).toBe("walls");
   fireEvent.keyDown(host, { key: "d", ctrlKey: true });
   expect(history.present.annotations).toHaveLength(2);
-  expect(history.undoLabel).toBe("Duplicate markups");
+  expect(history.undoLabel).toBe("Draw highlight");
   fireEvent.keyDown(host, { key: "Delete" });
   expect(history.present.annotations).toHaveLength(1);
-  expect(history.undoLabel).toBe("Delete selection");
+  expect(history.undoLabel).toBe("Delete highlight");
   fireEvent.click(screen.getByRole("button", { name: "Undo" }));
   expect(history.present.annotations).toHaveLength(2);
   fireEvent.click(screen.getByRole("button", { name: "Properties" }));
@@ -575,7 +579,7 @@ it("moves from the group outline in one step and cancels unfinished drag on Save
   fireEvent.pointerUp(overlay(), { pointerId: 9, clientX: 127, clientY: 100 });
   expect(history.present.annotations[0].points[0].x).toBeCloseTo(140);
   expect(history.present.shapes![0].a.x).toBeCloseTo(140);
-  expect(history.undoLabel).toBe("Move selection");
+  expect(history.undoLabel).toBe("Move highlight");
   const saved = history.present;
   begin();
   act(() => history.cancelSnapshotDrafts());
@@ -735,7 +739,7 @@ it("reveals an off-page markup, transfers focus and nudges the selected highligh
   expect(history.undoLabel).toBeUndefined();
   fireEvent.keyDown(host, { key: "ArrowRight" });
   expect(history.present.annotations[0].points[0].x).toBe(102);
-  expect(history.undoLabel).toBe("Move stroke");
+  expect(history.undoLabel).toBe("Move highlight");
   fireEvent.keyDown(host, { code: "Space" });
   expect(host.className).toContain("can-pan");
   fireEvent.keyUp(host, { code: "Space" });
@@ -1032,12 +1036,12 @@ it("preserves keyboard toolbar activation and pans from page focus", () => {
 it.each(["100%", "Highlight", "Blue", "Undo"])(
   "pans immediately after a mouse click on %s without reactivating the button",
   (name) => {
-    render(<PdfNavigationView pages={[page(1)]} />);
+    const history = new SessionHistory(emptySession);
+    if (name === "Undo")
+      history.apply({ type: "commit", stroke: bulkFixture().annotations[0] });
+    render(<PdfNavigationView pages={[page(1)]} history={history} />);
     const host = screen.getByRole("region", { name: "PDF pages" });
     const button = screen.getByRole("button", { name, exact: true });
-    // Undo needs a committed change so it is enabled when clicked.
-    if (name === "Undo")
-      fireEvent.click(screen.getByRole("button", { name: "Thick" }));
     button.focus();
     fireEvent.click(button, { detail: 1 });
     expect(document.activeElement).toBe(host);
@@ -1104,7 +1108,7 @@ it.each(["100%", "Highlight", "Blue", "Undo"])(
   },
 );
 
-it("applies arbitrary highlight widths in one Undo step and discards drafts on Undo", () => {
+it("applies arbitrary widths outside history and cancels width drafts on keyboard Undo", () => {
   render(<PdfNavigationView pages={[page(1)]} />);
   const slider = screen.getByRole("slider", { name: "Highlight width slider" });
   const width = () =>
@@ -1114,13 +1118,13 @@ it("applies arbitrary highlight widths in one Undo step and discards drafts on U
   fireEvent.pointerUp(slider);
   expect(width()).toBe("100");
   fireEvent.click(screen.getByRole("button", { name: "Undo", exact: true }));
-  expect(width()).toBe("10");
+  expect(width()).toBe("100");
   fireEvent.click(screen.getByRole("button", { name: "Redo", exact: true }));
   expect(width()).toBe("100");
   fireEvent.change(slider, { target: { value: "0.25" } });
-  fireEvent.click(screen.getByRole("button", { name: "Undo", exact: true }));
+  fireEvent.keyDown(window, { key: "z", ctrlKey: true });
   fireEvent.pointerUp(slider);
-  expect(width()).toBe("10");
+  expect(width()).toBe("100");
   fireEvent.change(slider, { target: { value: "0.25" } });
   fireEvent.pointerUp(slider);
   const overlay = screen.getByLabelText("Highlights for page 1");
@@ -1764,7 +1768,7 @@ it("brings an offscreen Undo change into view and marks removed objects on Redo"
   history.apply({ type: "remove-stroke", id: stroke.id });
   render(<PdfNavigationView pages={[page(1), page(2)]} history={history} />);
   fireEvent.click(screen.getByRole("button", { name: "Undo", exact: true }));
-  expect(screen.getByText("Undid Delete stroke · Page 2")).toBeTruthy();
+  expect(screen.getByText("Undid Delete highlight · Page 2")).toBeTruthy();
   expect(
     screen.getByRole("region", { name: "PDF pages" }).scrollTop,
   ).toBeGreaterThan(0);
@@ -1772,7 +1776,7 @@ it("brings an offscreen Undo change into view and marks removed objects on Redo"
     document.querySelector('[data-page="2"] .history-change-overlay rect'),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Redo", exact: true }));
-  expect(screen.getByText("Redid Delete stroke · Page 2")).toBeTruthy();
+  expect(screen.getByText("Redid Delete highlight · Page 2")).toBeTruthy();
   expect(
     screen
       .getByLabelText("Highlights for page 2")

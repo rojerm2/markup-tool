@@ -6,7 +6,7 @@ Open a PDF, highlight or annotate it, and choose **Save Project** to keep the PD
 
 Hold **Space** and drag to pan, including after clicking a toolbar button. Text fields retain normal typing, and buttons reached with **Tab** retain normal Space activation. **Hand** mode keeps panning enabled without holding Space.
 
-Use the **Width** slider in Properties to set highlights from **0.25 to 100 pt**, or enter an exact value. The preview shows the thickness; release the slider to apply the adjustment as one Undo step. Thin, Medium, and Thick remain available as quick presets. Select an existing highlight in **Select/Edit** to adjust its width with the same control.
+Use the **Width** slider in Properties to set highlights from **0.25 to 100 pt**, or enter an exact value. The colored dot and dashed outline both show the actual thickness at the current zoom, including very thin widths. Release the slider to apply the adjustment. Thin, Medium, and Thick remain available as quick presets. Select an existing highlight in **Select/Edit** to adjust its width with the same control.
 
 Space returns numeric fields and sliders to the canvas for panning. Enter finishes width or page entry; page entry accepts digits only, validates the page range, and restores the current page when abandoned. Click the PDF to resume drawing. Real text fields keep normal spaces and editing shortcuts.
 
@@ -20,7 +20,9 @@ The current filename and full path appear above the workspace. For a saved or op
 
 In **Select/Edit**, a hand pointer marks clickable highlights, shapes, notes, arrows, and page legends. Resize handles retain their editing cursor, and panning shows grab/grabbing cursors.
 
-Undo/redo briefly outlines affected areas and shows the action/page in a status message. Offscreen changes are brought into view; deleted objects are outlined where they used to be. Reduced-motion settings use a static outline instead of pulsing.
+**Undo/Redo** applies only to creating, deleting, and moving highlight strokes. Color, width, rounding, category changes, drawing defaults, shapes, text, measurements, and page legends do not add history steps. Undoing a highlight movement keeps its latest appearance; undoing or redoing a highlight does not revert settings or other markups. Setting changes keep existing highlight redo available. Locked categories must be unlocked before their highlights can be undone or redone.
+
+Undo/redo briefly outlines affected highlight areas and shows the action/page in a status message. Offscreen changes are brought into view; deleted highlights are outlined where they used to be. Reduced-motion settings use a static outline instead of pulsing.
 
 ## Document navigation
 
@@ -32,7 +34,7 @@ complex annotations show a source preview and an annotation count.
 **Bookmarks** lets you name the current page and jump back to it later. Bookmarks
 are saved inside the project, including recovery checkpoints. Adding, changing
 or removing a bookmark creates unsaved project changes. Annotation Undo/Redo
-continues to affect annotations; use the bookmark controls to change bookmarks.
+continues to affect highlights; use the bookmark controls to change bookmarks.
 
 **Markups** lists highlights, shapes, text, arrows, measurements and page legends. Search by
 label, page, type or category, and combine the type/category/current-page filters.
@@ -58,7 +60,8 @@ work outside text fields. Copy takes marks from one page; navigate to another
 page and paste near the center of its current view. Copy remains available after
 changing pages and is local to the open document, separate from the Windows
 clipboard. Opening another document clears it. Duplicate keeps each mark on its
-own page with a small offset. Each bulk edit uses one Undo step.
+own page with a small offset. Highlight changes within a bulk edit use one Undo
+step; other selected markup changes remain applied.
 
 Drag the outer selection outline to move the group, or use arrow keys on the
 canvas (2 view units at 100% zoom, or 10 with Shift). Movement respects page
@@ -75,7 +78,7 @@ real-world distance, then enter the distance and unit in Properties and choose
 Scale belongs to that page; other pages remain uncalibrated. Units include mm,
 cm, m, in, ft and yd. Changing the unit converts the entered reference distance.
 Use **Change page scale** to reuse the reference points or draw a new reference.
-Recalibration updates that page's measurements and is one Undo step. Unlock any
+Recalibration updates that page's measurements without adding an Undo step. Unlock any
 locked measurements on the page before changing its scale.
 
 **Length** measures a dragged straight line. **Area** and **Perimeter** use a
@@ -104,7 +107,7 @@ older releases reject instead of silently losing measurements.
 In **Legends**, **Hide/Show** controls workspace visibility; exported PDFs still
 include hidden categories. **Lock/Unlock** protects assigned markups from moves,
 deletion and style changes. Locked categories cannot be deleted or selected for
-new highlighting until explicitly unlocked. These settings are undoable and
+new highlighting until explicitly unlocked. These settings are
 saved in the project. Projects with category protection use schema version 3;
 older releases reject them instead of silently dropping the protection.
 
@@ -204,7 +207,7 @@ The application limits annotation metadata to 16 MiB and the included PDF to 256
 
 ## Text boxes, feedback, and printing (0.2.6)
 
-Select a page legend or text note in **Select/Edit**, then drag an edge or corner handle to resize its box. Text reflows when the width changes. The box stays large enough to contain its text; dragging top or left edges holds the opposite edge in place, including on rotated sheets. Resize is one undoable operation. Escape or changing views cancels an unfinished resize.
+Select a page legend or text note in **Select/Edit**, then drag an edge or corner handle to resize its box. Text reflows when the width changes. The box stays large enough to contain its text; dragging top or left edges holds the opposite edge in place, including on rotated sheets. These edits are outside highlight history. Escape or changing views cancels an unfinished resize.
 
 Legend and note properties offer a **1–200 pt** slider plus direct numeric entry, including fractional sizes. Existing projects keep their original sizes. Saved legends retain their manually expanded box height, and the exported PDF uses the same layout.
 
@@ -228,14 +231,15 @@ Choose whether to apply drawing styles, add categories, or both. Existing
 markups keep their appearance. Matching category names and colors are reused;
 name conflicts create a numbered category rather than replacing an existing
 one. Reused categories retain their hidden and locked states. **Apply preset**
-is one undoable operation. Shape and measurement drawing defaults also persist
-in portable projects and can be undone.
+applies the settings without adding an Undo step. Shape and measurement drawing
+defaults also persist in portable projects.
 
 Select up to 100 highlights, shapes, text notes or arrows on one page, then open
 **Presets**, choose a saved preset, enter a symbol name and choose **Save selected
 markups as symbol**. Preview the symbol and choose **Place on current page** to
 insert it near the visible page center with fresh object IDs. Choose whether to
-import its categories. Placement is one undoable operation. Measurements,
+import its categories. Undo removes only the symbol's highlights; its other
+markups and imported categories remain. Measurements,
 calibration and page legends cannot be saved as symbols.
 
 **Export preset** produces a portable `.pmpreset` file of at most 1 MiB. It

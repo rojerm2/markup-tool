@@ -25,7 +25,7 @@ build is unsigned; trusted-publisher distribution requires a signing certificate
 - Export vector annotations while preserving the original page and drawing data.
 - Print an annotated preview using Windows print settings.
 - Navigate large sheets with pan, fit controls, and 10–3200% zoom.
-- Undo/redo with visual feedback; use dark mode, recent files, and optional sounds.
+- Highlight-only undo/redo with visual feedback; use dark mode, recent files, and optional sounds.
 - Recover unsaved work after a crash; navigate with thumbnails, bookmarks, and a searchable markup list.
 - Select, copy, and edit multiple markups; hide or lock categories.
 - Calibrate each page and measure lengths, areas, and perimeters.
