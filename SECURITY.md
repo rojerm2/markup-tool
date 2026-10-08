@@ -53,6 +53,11 @@ review aid rather than an automated engineering approval.
 
 ## Dependency review
 
+The 0.4.2 review on 2026-10-08 updated `source-map-js` to 1.2.2 for
+[GHSA-68fv-2mgg-jv7q](https://github.com/advisories/GHSA-68fv-2mgg-jv7q).
+The patched npm lockfile and current Windows Rust audit report no known
+vulnerabilities. The upstream maintenance warnings below remain unchanged.
+
 The 0.4.0 review on 2026-10-04 found no known vulnerabilities in the npm
 lockfile (including development dependencies) or Cargo lockfile. The Windows
 Rust audit also reports maintenance warnings for five `unic-*` crates used

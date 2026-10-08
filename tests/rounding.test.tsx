@@ -87,7 +87,9 @@ it("defaults old v1/v2 highlights and drawing to round, preserves nonpalette geo
     ),
   ).toBe(false);
   h.traverse("undo");
-  expect(h.present.annotations[0]).toBe(stroke);
+  expect(h.present.annotations[0].rounding).toBe(25);
+  expect(h.present.annotations[0].points).toBe(stroke.points);
+  expect(h.undoLabel).toBeUndefined();
 });
 it("has genuinely distinct continuous endpoint footprints, fixed width, and finite bounded bend primitives", () => {
   const paths = [0, 25, 50, 75].map((rounding) =>

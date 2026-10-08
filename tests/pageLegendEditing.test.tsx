@@ -149,7 +149,7 @@ const pointer = (
     clientX: x,
     clientY: y,
   });
-it("resizes from an edge with one undo step and discards cancelled resizing", () => {
+it("resizes from an edge without highlight history and discards cancelled resizing", () => {
   const h = new SessionHistory({
     ...emptySession,
     legends,
@@ -163,13 +163,15 @@ it("resizes from an edge with one undo step and discards cancelled resizing", ()
   expect(h.present.pageLegends![0]).toBe(key);
   pointer(svg, "pointerUp", 290, 125);
   expect(h.present.pageLegends![0].width).toBe(270);
+  const resized = h.present.pageLegends![0];
   act(() => h.traverse("undo"));
-  expect(h.present.pageLegends![0]).toBe(key);
+  expect(h.present.pageLegends![0]).toBe(resized);
+  expect(h.undoLabel).toBeUndefined();
   pointer(handle, "pointerDown", 220, 125);
   pointer(svg, "pointerMove", 280, 125);
   act(() => h.invalidate());
   pointer(svg, "pointerUp", 280, 125);
-  expect(h.present.pageLegends![0]).toBe(key);
+  expect(h.present.pageLegends![0]).toBe(resized);
   expect(captured).toBeNull();
 });
 it("keeps placement out of snapshots until release and cancels an incomplete click", () => {
@@ -243,12 +245,17 @@ it("commits a whole move once and excludes property drafts from snapshots until 
   expect(h.present.pageLegends![0].title).toBe("New title");
   expect(snapshot.pageLegends![0].title).toBe("LEGEND");
   h.traverse("undo");
-  expect(h.present).toBe(snapshot);
+  expect(h.present.pageLegends![0]).toMatchObject({
+    x: 55,
+    y: 670,
+    title: "New title",
+  });
   h.traverse("undo");
-  expect(h.present.pageLegends![0]).toBe(key);
+  expect(h.present.pageLegends![0].title).toBe("New title");
+  expect(h.undoLabel).toBeUndefined();
 });
 
-it("changes the explicitly named key background independently of Border with Apply and undo", () => {
+it("changes the explicitly named key background independently of Border without adding highlight history", () => {
   const h = new SessionHistory({
     ...emptySession,
     legends,
@@ -268,5 +275,9 @@ it("changes the explicitly named key background independently of Border with App
     border: true,
   });
   h.traverse("undo");
-  expect(h.present.pageLegends![0]).toBe(key);
+  expect(h.present.pageLegends![0]).toMatchObject({
+    background: false,
+    border: true,
+  });
+  expect(h.undoLabel).toBeUndefined();
 });

@@ -66,11 +66,11 @@ export default function StrokeSizePreview({
       <circle
         cx={center.x}
         cy={center.y}
-        r={Math.max(6, radius)}
+        r={radius}
         fill="none"
         stroke="#334155"
-        strokeWidth={1}
-        strokeDasharray="3 3"
+        strokeWidth={Math.min(1, radius / 2)}
+        strokeDasharray={`${Math.min(3, radius)} ${Math.min(3, radius)}`}
       />
       <g
         transform={`translate(${center.x - 46},${Math.max(8, center.y - Math.min(radius, 80) - 38)})`}

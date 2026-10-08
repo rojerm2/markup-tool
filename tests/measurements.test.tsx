@@ -82,7 +82,8 @@ it("keeps wide measurement labels inside page bounds after movement and paste wi
   expect(history.apply(pasted.action)).toBe(true);
   expect(history.present.measurements).toHaveLength(2);
   history.traverse("undo");
-  expect(history.present).toBe(session);
+  expect(history.present.measurements).toHaveLength(2);
+  expect(history.undoLabel).toBeUndefined();
   const tooWide = { ...session, measurements: [{ ...value, fontSize: 200 }] };
   expect(() =>
     pasteMarkups(
@@ -304,7 +305,7 @@ it("persists calibration and geometry in version 4, validates input bounds and r
     ).toThrow("Invalid project");
 });
 
-it("undoes calibration and geometry, rejects stale edits and prevents locks or ID collisions being bypassed", () => {
+it("keeps calibration and geometry outside highlight history, rejects stale edits and prevents lock/ID bypass", () => {
   const history = new SessionHistory(emptySession);
   expect(
     history.apply({
@@ -317,7 +318,7 @@ it("undoes calibration and geometry, rejects stale edits and prevents locks or I
   expect(history.apply({ type: "put-measurement", measurement: area })).toBe(
     true,
   );
-  expect(history.undoLabel).toBe("Draw/edit measurement");
+  expect(history.undoLabel).toBeUndefined();
   const before = history.present;
   expect(
     history.apply({
@@ -339,11 +340,11 @@ it("undoes calibration and geometry, rejects stale edits and prevents locks or I
     200,
   );
   history.traverse("undo");
-  expect(history.present).toBe(before);
+  expect(history.present.calibrations![0].distance).toBe(20);
   history.traverse("undo");
-  expect(history.present.measurements).toBeUndefined();
+  expect(history.present.measurements![0]).toBe(area);
   history.traverse("undo");
-  expect(history.present).toBe(emptySession);
+  expect(history.present.calibrations![0].distance).toBe(20);
   const protectedState = {
     ...before,
     legends: [{ id: "walls", name: "Walls", color: "#facc15", locked: true }],
@@ -399,7 +400,7 @@ it("undoes calibration and geometry, rejects stale edits and prevents locks or I
   expect(removed.objectCategories).toBeUndefined();
 });
 
-it("copies, moves and deletes measurements through bulk history while using only the destination page calibration", () => {
+it("copies, moves and deletes measurements outside highlight history using the destination page calibration", () => {
   const viewport = {
     width: 600,
     height: 800,
@@ -422,9 +423,10 @@ it("copies, moves and deletes measurements through bulk history while using only
     measurementValues(history.present.measurements![0], calibration).area,
   ).toBe(50);
   history.traverse("undo");
+  expect(history.undoLabel).toBeUndefined();
   const pasted = pasteMarkups(
-    before,
-    copyMarkups(before, ["area"], viewport),
+    history.present,
+    copyMarkups(history.present, ["area"], viewport),
     2,
     viewport,
     { x: 300, y: 400 },
@@ -446,7 +448,8 @@ it("copies, moves and deletes measurements through bulk history while using only
   history.apply(deleteMarkups(copied, ["area", "copy"]));
   expect(history.present.measurements).toBeUndefined();
   history.traverse("undo");
-  expect(history.present).toBe(copied);
+  expect(history.present.measurements).toBeUndefined();
+  expect(history.present.calibrations).toBe(copied.calibrations);
   const changed = {
     ...copied,
     calibrations: [{ ...calibration, distance: 20 }],

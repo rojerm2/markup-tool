@@ -4,6 +4,25 @@ Versioned changes follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-08
+
+### Changed
+
+- Undo/redo now tracks highlight creation, deletion, and movement only. Property
+  adjustments, category settings, and other markup types remain applied.
+- Highlight history preserves the latest appearance and keeps redo available
+  after setting changes, without bypassing locks or restoring deleted categories.
+
+### Fixed
+
+- The dashed width-preview circle shrinks with the colored dot below the old
+  minimum size, including 0.25 pt highlights and different zoom levels.
+
+### Security
+
+- Update transitive `source-map-js` to 1.2.2 for
+  [GHSA-68fv-2mgg-jv7q](https://github.com/advisories/GHSA-68fv-2mgg-jv7q).
+
 ## [0.4.1] - 2026-10-04
 
 ### Fixed
@@ -78,6 +97,7 @@ Earlier commits contain the development history for portable projects,
 highlighter/shapes/text editing, large-PDF export, focus handling,
 undo/redo, dark mode, zoom, sounds, and recent files.
 
+[0.4.2]: https://github.com/rojerm2/markup-tool/releases/tag/v0.4.2
 [0.4.1]: https://github.com/rojerm2/markup-tool/releases/tag/v0.4.1
 [0.4.0]: https://github.com/rojerm2/markup-tool/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rojerm2/markup-tool/releases/tag/v0.3.0

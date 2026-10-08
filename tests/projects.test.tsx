@@ -869,6 +869,14 @@ function editPointer(page = 1) {
       ),
     );
 }
+
+function drawHistoryHighlight() {
+  click("Highlight");
+  const pointer = editPointer();
+  pointer("pointerdown", 240, 300);
+  pointer("pointermove", 400, 300);
+  pointer("pointerup", 400, 300);
+}
 it("M7 full App saves/reopens moved, reassigned, manual, resized and deleted multi-page strokes, then deletes the last edited stroke", async () => {
   const original = await openEditable();
   selected("one");
@@ -1077,7 +1085,7 @@ it("history traverses pending save snapshots, dirty equality and successful Save
   create();
   click("Save Project");
   await idle();
-  click("Thick");
+  drawHistoryHighlight();
   const save = deferred<string | null>();
   vi.mocked(files.writeProject).mockReturnValueOnce(save.promise);
   click("Save As");
@@ -1094,7 +1102,10 @@ it("history traverses pending save snapshots, dirty equality and successful Save
   click("Thin");
   expect(status()).toContain("Unsaved changes");
   historyKey();
-  expect(status()).not.toContain("Unsaved changes");
+  expect(status()).toContain("Unsaved changes");
+  expect(
+    (screen.getByLabelText("Highlight width") as HTMLInputElement).value,
+  ).toBe("5");
   click("Save Project");
   await idle();
   expect(vi.mocked(files.writeProject).mock.calls[2][0]).toBe(
@@ -1118,6 +1129,7 @@ it("history survives cancelled/failed replacement and resets only on successful 
   await openPdf();
   create();
   click("Thick");
+  drawHistoryHighlight();
   click("Undo");
   click("Open PDF");
   historyKey();
@@ -1169,6 +1181,7 @@ it("history shortcuts exclude editable and modal targets, unrelated modifiers, a
   await openPdf();
   create();
   click("Thick");
+  drawHistoryHighlight();
   for (const html of [
     "<input>",
     "<textarea></textarea>",
@@ -1198,8 +1211,13 @@ it("history shortcuts exclude editable and modal targets, unrelated modifiers, a
   ).toBe("true");
   expect(historyKey()).toBe(false);
   expect(
-    screen.getByRole("button", { name: "Medium" }).getAttribute("aria-pressed"),
+    screen.getByRole("button", { name: "Thick" }).getAttribute("aria-pressed"),
   ).toBe("true");
+  expect(
+    screen
+      .getByLabelText("Highlights for page 1")
+      .querySelectorAll("[data-annotation-id]"),
+  ).toHaveLength(0);
   expect(historyKey("z", true)).toBe(false);
   expect(
     screen.getByRole("button", { name: "Thick" }).getAttribute("aria-pressed"),
@@ -1237,11 +1255,23 @@ it.each(["highlight", "edit"])(
     expect(
       parseProject(vi.mocked(files.writeProject).mock.calls[0][2]).session,
     ).toEqual(original.session);
-    if (tool === "highlight") click("Thick");
-    else {
+    click("Select/Edit");
+    selected("one");
+    fireEvent.keyDown(screen.getByRole("region", { name: "PDF pages" }), {
+      key: "ArrowRight",
+    });
+    if (tool === "highlight") {
+      click("Highlight");
+      click("Thick");
+    } else {
       selected("one");
       click("Selected stroke Blue");
     }
+    click("Save Project");
+    await idle();
+    const committed = parseProject(
+      vi.mocked(files.writeProject).mock.calls[1][2],
+    );
     pointer("pointerdown", 80);
     pointer("pointermove", 120, 90);
     click("Undo");
@@ -1251,10 +1281,10 @@ it.each(["highlight", "edit"])(
     expect(svg.querySelector("[data-selection-indicator]")).toBeNull();
     click("Save Project");
     await idle();
-    const saved = parseProject(vi.mocked(files.writeProject).mock.calls[1][2]);
+    const saved = parseProject(vi.mocked(files.writeProject).mock.calls[2][2]);
     expect(saved.session.annotations).toHaveLength(3);
     expect(saved.session.annotations[0].points).toEqual(
-      original.session.annotations[0].points,
+      committed.session.annotations[0].points,
     );
     expect(
       screen
@@ -1270,6 +1300,11 @@ it("failed/cancelled saves preserve redo and dirty close locks history until can
   await openEditable();
   selected("one");
   click("Selected stroke Blue");
+  click("Save Project");
+  await idle();
+  fireEvent.keyDown(screen.getByRole("region", { name: "PDF pages" }), {
+    key: "ArrowRight",
+  });
   click("Undo");
   vi.mocked(files.writeProject).mockResolvedValueOnce(null);
   click("Save As");
@@ -1333,13 +1368,15 @@ it("comparison isolates background shortcuts even when focus leaves the dialog a
   ).toBe(20);
 });
 
-it("undo creation clears a stale legend rename target and allows a new category", async () => {
+it("highlight undo keeps categories/rename settings and allows creating a new category without clearing redo", async () => {
   render(<App />);
   await openPdf();
   create();
+  drawHistoryHighlight();
   click("Rename legend Walls");
   click("Undo");
-  expect(screen.queryByRole("button", { name: "Save name" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Save name" })).toBeTruthy();
+  click("Cancel rename");
   fireEvent.change(screen.getByLabelText("Legend name"), {
     target: { value: "Doors" },
   });
@@ -1349,7 +1386,7 @@ it("undo creation clears a stale legend rename target and allows a new category"
     screen
       .getByRole("button", { name: "Redo", exact: true })
       .hasAttribute("disabled"),
-  ).toBe(true);
+  ).toBe(false);
 });
 
 it("export snapshots committed state while edits/history continue and locks other file operations", async () => {
@@ -1359,6 +1396,7 @@ it("export snapshots committed state while edits/history continue and locks othe
   click("Save Project");
   await idle();
   click("Thick");
+  drawHistoryHighlight();
   const pendingExport = deferred<string | null>();
   vi.mocked(exports.exportPdf).mockReturnValueOnce(pendingExport.promise);
   click("Export Annotated PDF");
@@ -1392,7 +1430,10 @@ it("export snapshots committed state while edits/history continue and locks othe
     screen.getByRole("button", { name: "Undo" }).hasAttribute("disabled"),
   ).toBe(false);
   click("Undo");
-  expect(status()).not.toContain("Unsaved changes");
+  expect(status()).toContain("Unsaved changes");
+  expect(
+    (screen.getByLabelText("Highlight width") as HTMLInputElement).value,
+  ).toBe("5");
 });
 it("cancelled/failed exports preserve dirty baseline and unmount aborts a pending export", async () => {
   const view = render(<App />);

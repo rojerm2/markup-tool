@@ -193,7 +193,9 @@ it("creates arrows with snapping, ignores tiny gestures and excludes incomplete 
   pointer(svg, "pointerUp", 200, 150, true);
   expect(h.present.notes).toHaveLength(1);
   h.traverse("undo");
-  expect(h.present).toBe(emptySession);
+  expect(h.present.notes).toHaveLength(1);
+  expect(h.undoLabel).toBeUndefined();
+  h.apply({ type: "remove-note", id: h.present.notes![0].id });
   h.apply({ type: "put-note", note });
   r.rerender(<Notes h={h} placing="n" />);
   pointer(svg, "pointerDown", 50, 500);
@@ -229,7 +231,9 @@ it("moves note, reflows resize and edits one target with a single keyboard trans
   expect(next.pointers[1].target.x).toBe(202);
   expect(next.pointers[0]).toBe(note.pointers[0]);
   h.traverse("undo");
-  expect(h.present).toBe(before);
+  expect(h.present.notes![0]).toBe(next);
+  expect(before.notes![0]).not.toBe(next);
+  expect(h.undoLabel).toBeUndefined();
 });
 
 function Editor({ h }: { h: SessionHistory }) {
@@ -281,7 +285,8 @@ it("keeps text keystrokes local, shows glyph errors, cancels drafts and commits 
   fireEvent.click(screen.getByText("Apply text"));
   expect(h.present.notes![0]).toMatchObject({ text: "Line one\nLine two" });
   h.traverse("undo");
-  expect(h.present).toBe(emptySession);
+  expect(h.present.notes![0]).toMatchObject({ text: "Line one\nLine two" });
+  expect(h.undoLabel).toBeUndefined();
 });
 
 it.each(["snapshot", "history", "blur", "scroll"])(
@@ -336,5 +341,9 @@ it("labels White and Transparent backgrounds, preserves independent Border and k
     border: true,
   });
   h.traverse("undo");
-  expect(h.present).toBe(emptySession);
+  expect(h.present.notes![0]).toMatchObject({
+    background: false,
+    border: true,
+  });
+  expect(h.undoLabel).toBeUndefined();
 });
